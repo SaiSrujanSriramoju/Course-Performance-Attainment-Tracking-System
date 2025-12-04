@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Faculty Dashboard | University of Hyderabad</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="sidebar.css">
+
+
+  <!-- Prevent unauthorized access -->
+  <script>
+    if (localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+  </script>
+</head>
+
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo-section">
+      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <h2>Faculty Panel</h2>
+    </div>
+
+    <nav>
+      <a href="../faculty_ui/dashboard.html" class = "active">🏠 Dashboard</a>
+      <a href="../courses_ui/courses.html">📘 Courses</a>
+      <a href="../Reports_ui/reports.html">📊 Reports</a>
+      <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
+    </nav>
+  </aside>
+
+
+  <!-- Main Content -->
+  <main class="content">
+    
+    <header>
+      <h1>Welcome, Faculty Member</h1>
+      <p class="dept">Department of Computer Science</p>
+    </header>
+
+    <!-- ONLY ONE CARD LEFT -->
+    <section class="cards">
+      <div class="card" id="coursesAssignedCard">
+        <h3>Courses Assigned</h3>
+        <p id="coursesCount">0</p>
+      </div>
+    </section>
+
+    <!-- Course Performance Summary -->
+    <section class="data-section">
+      <h2>Course Performance Summary</h2>
+
+      <table id="summaryTable">
+        <thead>
+          <tr>
+            <th>Course</th>
+            <th>Batch</th>
+            <th>Average (Tot)</th>
+            <th>% Above Threshold</th>
+            <th>Attainment Level</th>
+          </tr>
+        </thead>
+
+        <tbody id="summaryBody">
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      © 2025 University of Hyderabad | Faculty Portal
+    </footer>
+
+  </main>
+
+
+<script>
+/* ---------------------- LOGOUT ---------------------- */
+function logout() {
+    localStorage.removeItem("facultyLoggedIn");
+    window.location.href = "../login/index.html";
+}
+
+/* ---------------------- LOAD DASHBOARD DATA ---------------------- */
+function loadDashboard() {
+
+    const courses = JSON.parse(localStorage.getItem("courses")) || [];
+    document.getElementById("coursesCount").innerText = courses.length;
+
+    const tbody = document.getElementById("summaryBody");
+    tbody.innerHTML = "";
+
+    if (courses.length === 0) {
+        tbody.innerHTML = `
+            <tr><td colspan="5" style="text-align:center;">No courses added yet.</td></tr>
+        `;
+        return;
+    }
+
+    let anyData = false;
+
+    courses.forEach((course, index) => {
+        const reportKey = "report_" + index;
+        const report = JSON.parse(localStorage.getItem(reportKey));
+
+        if (report) { anyData = true; }
+
+        const avg = report ? (report.summary.avgs["Tot"]?.toFixed(2) || "—") : "—";
+        const threshold = report ? (report.percent["Tot"] || "—") : "—";
+
+        let att = "—";
+        if (report && report.attainmentLevel) {
+            att = report.attainmentLevel["Tot"] || "—";
+        }
+
+        const row = `
+            <tr>
+                <td>${course.name}</td>
+                <td>${course.batch}</td>
+                <td>${avg}</td>
+                <td>${threshold}%</td>
+                <td>${att}</td>
+            </tr>
+        `;
+        tbody.innerHTML += row;
+    });
+
+    if (!anyData) {
+        tbody.innerHTML = `
+            <tr><td colspan="5" style="text-align:center;">No reports generated yet.</td></tr>
+        `;
+    }
+}
+
+loadDashboard();
+</script>
+
+</body>
+</html>

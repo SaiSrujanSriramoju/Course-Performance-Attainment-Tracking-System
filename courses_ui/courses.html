@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Courses | Faculty Portal</title>
+
+<!-- COMBINED CSS (Dashboard style + Courses fixes) -->
+<style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family: 'Segoe UI', sans-serif; }
+
+    body { display:flex; background:#f5f5f5; }
+
+    /* SIDEBAR */
+    .sidebar {
+        width: 260px;
+        background: #8b0f1e;
+        height: 100vh;
+        padding-top: 20px;
+        color: white;
+        position: fixed;
+        left:0;
+        top:0;
+    }
+
+    .logo-section {
+        text-align:center;
+        margin-bottom:20px;
+    }
+
+    .logo-section img {
+        width: 120px;
+        margin-bottom: 10px;
+    }
+
+    .logo-section h2 {
+        font-size: 22px;
+        font-weight: 700;
+    }
+
+    nav a {
+        display:block;
+        padding: 14px 25px;
+        font-size: 18px;
+        color:white;
+        text-decoration:none;
+        border-radius:6px;
+        margin:6px 10px;
+    }
+
+    nav a:hover,
+    nav a.active {
+        background:#a10e1d;
+    }
+
+    nav a.logout {
+        background:#c62828;
+        margin-top:40px;
+    }
+
+    /* MAIN CONTENT */
+    .content {
+        margin-left:260px;
+        width: calc(100% - 260px);
+        padding: 30px 40px;
+    }
+
+    .page-title {
+        font-size: 32px;
+        font-weight: 700;
+        color: #a10e1d;
+        margin-bottom: 10px;
+    }
+
+    #addCourseBtn {
+        background: #a10e1d;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        margin-bottom: 20px;
+    }
+
+    /* COURSE CARD */
+    .course-card {
+        background:white;
+        padding:25px;
+        border-radius:12px;
+        box-shadow:0 2px 6px rgba(0,0,0,0.1);
+        margin-top:20px;
+        width:85%;
+    }
+
+    .btn {
+        padding:8px 16px;
+        border:none;
+        border-radius:6px;
+        cursor:pointer;
+        font-weight:bold;
+        margin-right:8px;
+    }
+
+    .btn-blue { background:#0d6efd; color:white; }
+    .btn-red { background:#c62828; color:white; }
+    .btn-green { background:#2e7d32; color:white; }
+
+    /* MODAL */
+    .modal {
+        position: fixed;
+        left:0; top:0;
+        width:100%; height:100%;
+        background: rgba(0,0,0,0.5);
+        display:none;
+        justify-content:center;
+        align-items:center;
+    }
+
+    .modal-content {
+        background:white;
+        padding:25px;
+        width:400px;
+        border-radius:10px;
+    }
+
+    .modal-content h3 { margin-bottom:15px; }
+
+    .modal-content input,
+    .modal-content select {
+        width:100%;
+        padding:10px;
+        margin-bottom:10px;
+        border-radius:6px;
+        border:1px solid #bbb;
+    }
+
+    .modal-buttons {
+        text-align:right;
+    }
+
+</style>
+
+<script>
+    /* Redirect if not logged in */
+    if (localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+</script>
+
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+    <div class="logo-section">
+        <img src="../faculty_ui/uoh_logo.png">
+        <h2>Faculty Panel</h2>
+    </div>
+
+    <nav>
+        <a href="../faculty_ui/dashboard.html">🏠 Dashboard</a>
+        <a href="courses.html" class="active">📘 Courses</a>
+        <a href="../Reports_ui/reports.html">📊 Reports</a>
+        <a href="../login/index.html" class="logout">🚪 Logout</a>
+    </nav>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main class="content">
+
+    <h1 class="page-title">Course Management</h1>
+
+    <button id="addCourseBtn">+ Add Course</button>
+
+    <div id="coursesList"></div>
+
+</main>
+
+<!-- ADD/EDIT MODAL -->
+<div id="courseModal" class="modal">
+    <div class="modal-content">
+        <h3 id="modalTitle">Add Course</h3>
+
+        <label>Course Name</label>
+        <input type="text" id="courseName">
+
+        <label>Batch</label>
+        <select id="courseBatch">
+            <option value="MCA">MCA</option>
+            <option value="MTECH">MTECH</option>
+            <option value="IMTECH">IMTECH</option>
+        </select>
+
+        <label>Start Year</label>
+        <input type="number" id="startYear">
+
+        <label>End Year</label>
+        <input type="number" id="endYear">
+
+        <label>Passing %</label>
+        <input type="number" id="passingPercent">
+
+        <div class="modal-buttons">
+            <button class="btn btn-blue" id="saveCourse">Save</button>
+            <button class="btn btn-red" onclick="closeModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="coPoUpload" accept="application/pdf" style="display:none">
+
+<!-- JAVASCRIPT (FULL LOGIC) -->
+<script>
+
+let courses = JSON.parse(localStorage.getItem("courses")) || [];
+let editingIndex = -1;
+
+function saveCourses() {
+    localStorage.setItem("courses", JSON.stringify(courses));
+    loadCourses();
+}
+
+function loadCourses() {
+    const list = document.getElementById("coursesList");
+    list.innerHTML = "";
+
+    if (courses.length === 0) {
+        list.innerHTML = "<p>No courses added yet.</p>";
+        return;
+    }
+
+    courses.forEach((c, index) => {
+        const card = document.createElement("div");
+        card.className = "course-card";
+
+        card.innerHTML = `
+            <h3>${c.name}</h3>
+            <p><strong>Batch:</strong> ${c.batch} ${c.startYear}-${c.endYear}</p>
+            <p><strong>Passing %:</strong> ${c.passPercent}</p>
+
+            <button class="btn btn-blue" onclick="editCourse(${index})">Edit</button>
+            <button class="btn btn-red" onclick="deleteCourse(${index})">Delete</button>
+            <button class="btn btn-green" onclick="uploadCoPo(${index})">Upload CO-PO PDF</button>
+
+            ${c.copoPdf ? `<p>CO-PO PDF: <a href="${c.copoPdf}" download>${c.copoPdfName}</a></p>` : ""}
+        `;
+
+        list.appendChild(card);
+    });
+}
+
+document.getElementById("addCourseBtn").onclick = () => {
+    editingIndex = -1;
+    openModal();
+};
+
+function openModal() {
+    document.getElementById("courseModal").style.display = "flex";
+}
+
+function closeModal() {
+    document.getElementById("courseModal").style.display = "none";
+}
+
+document.getElementById("saveCourse").onclick = () => {
+    const name = courseName.value.trim();
+    const batch = courseBatch.value;
+    const start = startYear.value;
+    const end = endYear.value;
+    const pass = passingPercent.value;
+
+    if (!name || !start || !end || !pass) {
+        alert("Please fill all fields");
+        return;
+    }
+
+    const courseObj = {
+        name,
+        batch,
+        startYear: start,
+        endYear: end,
+        passPercent: pass,
+        copoPdf: null,
+        copoPdfName: null
+    };
+
+    if (editingIndex === -1) courses.push(courseObj);
+    else courses[editingIndex] = courseObj;
+
+    saveCourses();
+    closeModal();
+};
+
+function editCourse(i) {
+    editingIndex = i;
+
+    let c = courses[i];
+    courseName.value = c.name;
+    courseBatch.value = c.batch;
+    startYear.value = c.startYear;
+    endYear.value = c.endYear;
+    passingPercent.value = c.passPercent;
+
+    openModal();
+}
+
+function deleteCourse(i) {
+    if (confirm("Delete this course?")) {
+        courses.splice(i, 1);
+        saveCourses();
+    }
+}
+
+function uploadCoPo(index) {
+    let input = document.getElementById("coPoUpload");
+    input.click();
+
+    input.onchange = e => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        let url = URL.createObjectURL(file);
+
+        courses[index].copoPdf = url;
+        courses[index].copoPdfName = file.name;
+
+        saveCourses();
+    };
+}
+
+loadCourses();
+
+</script>
+
+</body>
+</html>

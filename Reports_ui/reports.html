@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reports | Faculty Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- ===== External libs ===== -->
+  <!-- SheetJS for Excel parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- html2canvas for capturing DOM to image -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <!-- jsPDF for PDF generation -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <style>
+    /* ---------- Global layout ---------- */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: flex;
+      min-height: 100vh;
+      background: #f6f3f3;
+      color: #222;
+    }
+
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    /* ---------- Sidebar ---------- */
+    .sidebar {
+      width: 260px;
+      background: #8d0c18;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      padding: 24px 20px;
+    }
+
+    .sidebar-logo {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .sidebar-logo img {
+      width: 110px;
+      height: auto;
+      display: block;
+      margin: 0 auto 8px;
+    }
+
+    .sidebar-logo h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+
+    .sidebar nav {
+      margin-top: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-link {
+      padding: 10px 14px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.96rem;
+    }
+
+    .nav-link span.icon {
+      width: 20px;
+      text-align: center;
+    }
+
+    .nav-link.active {
+      background: #b0101f;
+      font-weight: 600;
+    }
+
+    .nav-link.logout {
+      margin-top: auto;
+      background: #c62828;
+    }
+
+    .nav-link.logout:hover {
+      background: #b71c1c;
+    }
+
+    .nav-link:hover:not(.logout):not(.active) {
+      background: #a00e1d;
+    }
+
+    /* ---------- Main content ---------- */
+    .main {
+      flex: 1;
+      padding: 24px 40px;
+      overflow-y: auto;
+    }
+
+    .page-header {
+      margin-bottom: 18px;
+    }
+
+    .page-header h1 {
+      font-size: 2rem;
+      color: #a10e1d;
+      margin-bottom: 4px;
+    }
+
+    .page-header p {
+      font-size: 0.98rem;
+      color: #555;
+    }
+
+    /* ---------- Course card ---------- */
+    .course-card {
+      max-width: 920px;
+      background: #fff;
+      border-radius: 16px;
+      padding: 22px 26px 24px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04);
+      border: 1px solid #eee;
+      margin-bottom: 24px;
+    }
+
+    .course-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .course-meta {
+      font-size: 0.96rem;
+      margin-bottom: 10px;
+    }
+
+    .course-meta span.label {
+      font-weight: 600;
+    }
+
+    .course-instructions {
+      font-size: 0.9rem;
+      color: #555;
+      margin-top: 4px;
+      margin-bottom: 14px;
+    }
+
+    .course-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 999px;
+      padding: 9px 18px;
+      font-size: 0.92rem;
+      cursor: pointer;
+      transition: background 0.18s, box-shadow 0.18s, transform 0.05s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn-primary {
+      background: #0d47a1;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(13, 71, 161, 0.35);
+    }
+
+    .btn-primary:hover {
+      background: #0b3c8c;
+    }
+
+    .btn-grey {
+      background: #e0e0e0;
+      color: #333;
+    }
+
+    .btn-grey:hover {
+      background: #d5d5d5;
+    }
+
+    .btn-outline {
+      background: #fff;
+      color: #555;
+      border: 1px solid #ccc;
+    }
+
+    .btn-outline:hover {
+      background: #f5f5f5;
+    }
+
+    .btn-disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .helper-text {
+      font-size: 0.82rem;
+      color: #777;
+      margin-top: 6px;
+    }
+
+    /* ---------- Drawer (report viewer) ---------- */
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: -420px;
+      width: 420px;
+      height: 100vh;
+      background: #fafafa;
+      box-shadow: -4px 0 18px rgba(0, 0, 0, 0.18);
+      display: flex;
+      transition: right 0.25s ease-out;
+      z-index: 20;
+    }
+
+    .drawer.open {
+      right: 0;
+    }
+
+    .drawer-panel {
+      padding: 16px 18px 20px;
+      width: 100%;
+      overflow-y: auto;
+    }
+
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .drawer-header h2 {
+      font-size: 1.2rem;
+      color: #a10e1d;
+    }
+
+    .drawer-header p {
+      font-size: 0.88rem;
+      color: #555;
+    }
+
+    .drawer-close {
+      background: none;
+      border: none;
+      font-size: 1.4rem;
+      cursor: pointer;
+      line-height: 1;
+      color: #444;
+    }
+
+    /* Area that becomes the report (used also for PDF) */
+    #resultsPrintable {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      color: #222;
+    }
+
+    #resultsPrintable h4 {
+      font-weight: 700;
+      color: #a10e1d;
+      margin: 14px 0 6px;
+    }
+
+    .result-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 2px 0;
+    }
+
+    .result-row span:last-child {
+      font-weight: 500;
+    }
+
+    .section-separator {
+      border-top: 1px solid #ddd;
+      margin: 10px 0;
+    }
+
+    /* Drawer footer (buttons – UI only, not in PDF) */
+    .drawer-footer {
+      margin-top: 14px;
+      display: flex;
+      justify-content: flex-start;
+      gap: 8px;
+    }
+
+    .only-ui {
+      /* these are hidden when exporting to PDF (we hide parent) */
+    }
+
+    /* ---------- Attainment modal ---------- */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 30;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      background: #fff;
+      border-radius: 14px;
+      padding: 18px 20px 16px;
+      width: 360px;
+      max-width: 95vw;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+    }
+
+    .modal h3 {
+      font-size: 1.1rem;
+      margin-bottom: 6px;
+      color: #a10e1d;
+    }
+
+    .modal p {
+      font-size: 0.86rem;
+      color: #555;
+      margin-bottom: 10px;
+    }
+
+    .modal label {
+      font-size: 0.85rem;
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .modal input[type="number"] {
+      width: 100%;
+      padding: 6px 8px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 0.9rem;
+    }
+
+    .levels-grid {
+      max-height: 180px;
+      overflow-y: auto;
+      margin-top: 6px;
+      margin-bottom: 8px;
+    }
+
+    .level-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .level-row span {
+      font-size: 0.82rem;
+      width: 46px;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    /* ---------- Download button under main card ---------- */
+    .download-row {
+      max-width: 920px;
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 18px;
+    }
+
+    .download-row .btn {
+      padding-inline: 20px;
+    }
+
+    /* ---------- Footer ---------- */
+    footer {
+      font-size: 0.82rem;
+      color: #777;
+      margin-top: 18px;
+    }
+
+    @media (max-width: 920px) {
+      .sidebar {
+        display: none;
+      }
+      .main {
+        padding: 16px 16px 40px;
+      }
+      .course-card {
+        border-radius: 12px;
+      }
+      .drawer {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ========== SIDEBAR ========== -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <!-- Adjust src path if needed -->
+      <img src="uoh_logo.png" alt="University of Hyderabad Logo">
+      <h2>Faculty Panel</h2>
+    </div>
+    <nav>
+      <a href="../faculty_ui/dashboard.html" class="nav-link">
+        <span class="icon">🏠</span> <span>Dashboard</span>
+      </a>
+      <a href="../courses_ui/courses.html" class="nav-link">
+        <span class="icon">📘</span> <span>Courses</span>
+      </a>
+      <a href="#" class="nav-link active">
+        <span class="icon">📊</span> <span>Reports</span>
+      </a>
+      <a href="../login/index.html" class="nav-link logout">
+        <span class="icon">🚪</span> <span>Logout</span>
+      </a>
+    </nav>
+  </aside>
+
+  <!-- ========== MAIN CONTENT ========== -->
+  <main class="main">
+    <header class="page-header">
+      <h1>Reports &amp; Analysis</h1>
+      <!-- top instruction line REMOVED as requested -->
+      <p>Generate course-wise attainment reports from uploaded marks.</p>
+    </header>
+
+    <!-- Course cards are injected here -->
+    <section id="coursesArea"></section>
+
+    <!-- Download report button (enabled after a report is generated) -->
+    <div class="download-row">
+      <button id="downloadPdfBtn" class="btn btn-outline btn-disabled" disabled>
+        Download Report as PDF
+      </button>
+    </div>
+
+    <footer>© 2025 University of Hyderabad | Faculty Portal</footer>
+  </main>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="qpInput" accept="application/pdf" style="display:none;">
+  <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none;">
+
+  <!-- ========== REPORT DRAWER ========== -->
+  <div class="drawer" id="resultsDrawer">
+    <div class="drawer-panel">
+      <div class="drawer-header only-ui">
+        <div>
+          <h2 id="drawerCourseTitle">Course Report</h2>
+          <p id="drawerBatchInfo"></p>
+        </div>
+        <button class="drawer-close" id="closeDrawerBtn">&times;</button>
+      </div>
+
+      <!-- Printable content (used for PDF as well) -->
+      <div id="resultsPrintable"></div>
+
+      <!-- Footer buttons (UI only, not included in PDF) -->
+      <div class="drawer-footer only-ui">
+        <button id="defineLevelsBtn" class="btn btn-primary">Define Attainment Levels</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== ATTAINMENT MODAL ========== -->
+  <div class="modal-backdrop" id="attainmentModal">
+    <div class="modal">
+      <h3>Set Attainment Levels</h3>
+      <p>
+        Enter the percentage ranges for each attainment level.
+        Ranges must be continuous and non-overlapping, between 0 and 100.
+      </p>
+
+      <label for="levelsCountInput">Number of levels</label>
+      <input type="number" id="levelsCountInput" min="1" max="6" value="3">
+
+      <div class="levels-grid" id="levelsGrid">
+        <!-- Level rows injected here -->
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-grey" id="cancelLevelsBtn">Cancel</button>
+        <button class="btn btn-primary" id="saveLevelsBtn">Save Levels</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== SCRIPT ========== -->
+  <script>
+    // ========= CONFIG =========
+    const ROLL_COL = "Roll No";
+    const COLS = ["CO-1", "CO-2", "Tot"];
+
+    // ========= STATE =========
+    let courses = [];
+    let activeCourseIndex = null;       // which course is currently being processed
+    let lastPayload = null;             // last computed report for the active course (includes attainment)
+    let currentSummaryWithoutAtt = null;// summary before attainment so we can re-apply if needed
+
+    // ========= UTILS =========
+    function loadCourses() {
+      const raw = localStorage.getItem("courses");
+      if (!raw) return [];
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        console.warn("Invalid courses data in localStorage");
+        return [];
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, c => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+
+    function looksLikeRoll(val) {
+      if (val == null) return false;
+      const s = String(val).trim().toUpperCase();
+      // Example: 24MCMC01, 23MCMC18
+      return /^\d{2}MCMC\d{2}$/.test(s);
+    }
+
+    function attempted(val) {
+      if (val == null) return false;
+      const s = String(val).trim().toLowerCase();
+      return s !== "" && s !== "ab";
+    }
+
+    function toNumberSafe(v) {
+      if (v == null) return NaN;
+      const n = Number(String(v).trim());
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    // ========= RENDER COURSES =========
+    const coursesArea = document.getElementById("coursesArea");
+    const qpInput = document.getElementById("qpInput");
+    const excelInput = document.getElementById("excelInput");
+
+    function renderCourses() {
+      courses = loadCourses();
+      coursesArea.innerHTML = "";
+
+      if (!courses.length) {
+        const div = document.createElement("div");
+        div.className = "course-card";
+        div.innerHTML = "<p>No courses found. Please add courses in the Courses module.</p>";
+        coursesArea.appendChild(div);
+        return;
+      }
+
+      courses.forEach((c, idx) => {
+        const card = document.createElement("div");
+        card.className = "course-card";
+
+        const passing = c.passingPercent ?? c.passPercent ?? c.passing ?? "";
+
+        card.innerHTML = `
+          <div class="course-title">${escapeHtml(c.name || "Course " + (idx + 1))}</div>
+          <div class="course-meta">
+            <span class="label">Batch:</span> ${escapeHtml(c.batch || "Not set")}<br>
+            <span class="label">Passing %:</span> ${passing || "Not set"}
+          </div>
+          <p class="course-instructions">
+            1) Upload Question Paper PDF (for record).<br>
+            2) Upload marks Excel (.xlsx) to generate the report.
+          </p>
+          <div class="course-actions">
+            <button class="btn btn-grey" data-idx="${idx}" data-role="qp-btn">Upload Question Paper PDF</button>
+            <button class="btn btn-primary" data-idx="${idx}" data-role="marks-btn">Upload Marks Excel</button>
+            <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
+          </div>
+          <p class="helper-text">
+            Excel format: first row after header = max marks; following rows = students.
+          </p>
+        `;
+        coursesArea.appendChild(card);
+      });
+    }
+
+    // Delegate button clicks
+    coursesArea.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-role]");
+      if (!btn) return;
+      const idx = Number(btn.dataset.idx);
+      if (Number.isNaN(idx)) return;
+
+      const role = btn.dataset.role;
+      if (role === "qp-btn") {
+        handleQpUploadClick(idx);
+      } else if (role === "marks-btn") {
+        handleMarksUploadClick(idx);
+      } else if (role === "view-last-btn") {
+        handleViewLastReport(idx);
+      }
+    });
+
+    // ========= QUESTION PAPER UPLOAD (no verification) =========
+    let qpTargetIndex = null;
+
+    function handleQpUploadClick(idx) {
+      activeCourseIndex = idx;
+      qpTargetIndex = idx;
+      qpInput.value = "";
+      qpInput.click();
+    }
+
+    qpInput.addEventListener("change", () => {
+      const file = qpInput.files[0];
+      if (!file) return;
+      // We are not verifying; just storing the fact that QP is uploaded.
+      // You can also store the file name in localStorage if needed.
+      alert("Question paper uploaded. Now upload marks Excel.");
+    });
+
+    // ========= MARKS UPLOAD =========
+    let marksTargetIndex = null;
+
+    function handleMarksUploadClick(idx) {
+      activeCourseIndex = idx;
+      marksTargetIndex = idx;
+      excelInput.value = "";
+      excelInput.click();
+    }
+
+    excelInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = new Uint8Array(ev.target.result);
+          const workbook = XLSX.read(data, { type: "array" });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null });
+
+          const parsed = normalizeSheet(rows);
+          const summary = computeSummary(parsed);
+
+          currentSummaryWithoutAtt = summary; // save for later
+
+          // threshold percentage comes from Courses module
+          const course = courses[activeCourseIndex] || {};
+          const passPercent = Number(course.passingPercent ?? course.passPercent ?? course.passing ?? 0) || 0;
+
+          const thresholdData = computeThresholds(summary, passPercent);
+
+          // Build payload (without attainment yet)
+          const payload = {
+            courseName: course.name || "Course",
+            batch: course.batch || "",
+            passingPercent: passPercent,
+            summary,
+            thresholdPercent: passPercent,
+            thresholdMarks: thresholdData.thresholdMarks,
+            above: thresholdData.above,
+            percentages: thresholdData.percentages,
+            attainment: null,
+          };
+
+          lastPayload = payload;
+          // Render current report without attainment
+          renderReport(payload);
+          openDrawerForCourse(activeCourseIndex);
+
+          // Enable "Define Levels" button
+          document.getElementById("defineLevelsBtn").disabled = false;
+
+          // Persist base report (without attainment yet)
+          saveReportForCourse(activeCourseIndex, payload);
+
+          // When a fresh report is generated, disable PDF button until attainment is set
+          setPdfBtnEnabled(false);
+
+        } catch (err) {
+          console.error(err);
+          alert("Could not read the Excel file. Please check the format.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    // ========= NORMALIZE SHEET & SUMMARY =========
+    function normalizeSheet(rows) {
+      if (!rows || !rows.length) throw new Error("Empty sheet");
+
+      // Find header row containing Roll No (within first 6 rows)
+      let headerRowIndex = -1;
+      for (let i = 0; i < Math.min(rows.length, 6); i++) {
+        const row = rows[i].map(v => (v == null ? "" : String(v).trim()));
+        if (row.some(cell => cell.toLowerCase() === ROLL_COL.toLowerCase())) {
+          headerRowIndex = i;
+          break;
+        }
+      }
+      if (headerRowIndex === -1) headerRowIndex = 0;
+
+      const header = rows[headerRowIndex].map(h => (h == null ? "" : String(h).trim()));
+      const dataRows = rows.slice(headerRowIndex + 1);
+
+      const objs = dataRows.map((r) => {
+        const obj = {};
+        for (let i = 0; i < header.length; i++) {
+          if (!header[i]) continue;
+          obj[header[i]] = r[i] != null ? r[i] : null;
+        }
+        return obj;
+      });
+
+      return { header, rows: objs };
+    }
+
+    function computeSummary(parsed) {
+      const headers = parsed.header;
+      for (const col of [ROLL_COL, ...COLS]) {
+        if (!headers.includes(col)) {
+          throw new Error(`Missing column: ${col}`);
+        }
+      }
+
+      if (!parsed.rows.length) throw new Error("No data rows found");
+
+      // First row = max marks
+      const maxRow = parsed.rows[0];
+      const maxMarks = {};
+      for (const c of COLS) {
+        maxMarks[c] = toNumberSafe(maxRow[c]);
+      }
+
+      // Student rows (skip first row)
+      const studRows = parsed.rows.slice(1).filter(r => looksLikeRoll(r[ROLL_COL]));
+      const totalStudents = studRows.length;
+
+      // Attempts per column
+      const attempts = {};
+      for (const c of COLS) {
+        attempts[c] = studRows.reduce((acc, r) => acc + (attempted(r[c]) ? 1 : 0), 0);
+      }
+
+      // Appeared (using Tot if present)
+      let appeared;
+      if (headers.includes("Tot")) {
+        appeared = studRows.reduce((acc, r) => acc + (attempted(r["Tot"]) ? 1 : 0), 0);
+      } else {
+        appeared = studRows.reduce(
+          (acc, r) => acc + ((attempted(r["CO-1"]) || attempted(r["CO-2"])) ? 1 : 0),
+          0
+        );
+      }
+      const absentees = totalStudents - appeared;
+
+      // Averages per column (excluding absentees)
+      const avgs = {};
+      for (const c of COLS) {
+        const vals = studRows
+          .filter(r => attempted(r[c]))
+          .map(r => toNumberSafe(r[c]))
+          .filter(v => !Number.isNaN(v));
+        avgs[c] = vals.length ? vals.reduce((s, x) => s + x, 0) / vals.length : NaN;
+      }
+
+      return {
+        maxMarks,
+        studRows,
+        totalStudents,
+        attempts,
+        appeared,
+        absentees,
+        avgs,
+      };
+    }
+
+    function computeThresholds(summary, thresholdPercent) {
+      const thresholdMarks = {};
+      const above = {};
+      const percentages = {};
+
+      for (const c of COLS) {
+        // Use a safe numeric max; if max is not a finite number we preserve NaN
+        const rawMax = summary.maxMarks && summary.maxMarks[c];
+        const max = Number.isFinite(rawMax) ? rawMax : NaN;
+
+        if (!Number.isFinite(max)) {
+          // If max marks are missing or invalid, mark threshold as N/A and counts as 0
+          thresholdMarks[c] = NaN;
+          above[c] = 0;
+          percentages[c] = 0;
+          continue;
+        }
+
+        // Compute threshold mark (rounded to 2 decimals)
+        const thrMark = Number(((thresholdPercent / 100) * max).toFixed(2));
+        thresholdMarks[c] = thrMark;
+
+        const marks = summary.studRows
+          .filter(r => attempted(r[c]))
+          .map(r => toNumberSafe(r[c]))
+          .filter(v => !Number.isNaN(v));
+
+        // Count students whose numeric mark is >= threshold mark
+        const countAbove = marks.filter(m => m >= thrMark).length;
+        above[c] = countAbove;
+
+        const pct = summary.attempts && summary.attempts[c]
+          ? Number(((countAbove / summary.attempts[c]) * 100).toFixed(2))
+          : 0;
+        percentages[c] = pct;
+      }
+
+      return { thresholdMarks, above, percentages };
+    }
+
+    // ========= REPORT RENDERING =========
+    const resultsDrawer = document.getElementById("resultsDrawer");
+    const resultsPrintable = document.getElementById("resultsPrintable");
+    const drawerCourseTitle = document.getElementById("drawerCourseTitle");
+    const drawerBatchInfo = document.getElementById("drawerBatchInfo");
+
+    function openDrawerForCourse(idx) {
+      const course = courses[idx] || {};
+      drawerCourseTitle.textContent = course.name || "Course Report";
+      drawerBatchInfo.textContent = course.batch ? `Batch: ${course.batch}` : "";
+      resultsDrawer.classList.add("open");
+    }
+
+    document.getElementById("closeDrawerBtn").addEventListener("click", () => {
+      resultsDrawer.classList.remove("open");
+    });
+
+    function renderReport(payload) {
+      if (!payload) return;
+      lastPayload = payload;
+
+      // If a course is active and has a passingPercent set, prefer that value
+      // so reports always reflect the latest passing % entered in Courses module.
+      const s = payload.summary;
+      const currentCourse = (typeof activeCourseIndex === 'number' && !Number.isNaN(activeCourseIndex))
+        ? (courses[activeCourseIndex] || null)
+        : null;
+
+      const currentPassPercent = (currentCourse)
+        ? Number((currentCourse.passingPercent ?? currentCourse.passPercent ?? currentCourse.passing) || 0)
+        : Number(payload.passingPercent || payload.thresholdPercent || 0);
+
+      // Recompute threshold-related values using the latest passing percent
+      const recomputed = computeThresholds(s, currentPassPercent);
+
+      // Update payload fields so the display and saved report stay consistent
+      payload.thresholdPercent = currentPassPercent;
+      payload.thresholdMarks = recomputed.thresholdMarks;
+      payload.above = recomputed.above;
+      payload.percentages = recomputed.percentages;
+
+      const tPercent = payload.thresholdPercent;
+      const thrMarks = payload.thresholdMarks;
+      const above = payload.above;
+      const perc = payload.percentages;
+      const att = payload.attainment;
+
+      let html = "";
+
+      // Course header (small, inside report)
+      html += `
+        <div style="margin-bottom:10px;">
+          <div style="font-size:0.9rem;">University of Hyderabad</div>
+          <div style="font-size:1.1rem;font-weight:700;color:#a10e1d;margin-top:4px;">
+            ${escapeHtml(payload.courseName || "")}
+          </div>
+          <div style="font-size:0.88rem;margin-top:2px;">
+            Batch: ${escapeHtml(payload.batch || "")}
+          </div>
+          <div style="font-size:0.88rem;">
+            Passing %: ${payload.passingPercent ?? ""}
+          </div>
+          <div class="section-separator"></div>
+        </div>
+      `;
+
+      // SUMMARY
+      html += `
+        <h4>===== SUMMARY =====</h4>
+        <div class="result-row"><span>Total students in class</span><span>${s.totalStudents}</span></div>
+        <div class="result-row"><span>Students appeared for the test</span><span>${s.appeared}</span></div>
+        <div class="result-row"><span>Students absent</span><span>${s.absentees}</span></div>
+        <div class="section-separator"></div>
+      `;
+
+      // MAX MARKS
+      html += `
+        <h4>----- Maximum Marks -----</h4>
+        ${COLS.map(c => `
+          <div class="result-row">
+            <span>${c}</span><span>Max = ${isNaN(s.maxMarks[c]) ? "N/A" : s.maxMarks[c]}</span>
+          </div>
+        `).join("")}
+        <div class="section-separator"></div>
+      `;
+
+      // ATTEMPTS
+      html += `
+        <h4>----- Attempts per column -----</h4>
+        ${COLS.map(c => `
+          <div class="result-row">
+            <span>${c}</span><span>${s.attempts[c]}</span>
+          </div>
+        `).join("")}
+        <div class="section-separator"></div>
+      `;
+
+      // AVERAGES
+      html += `
+        <h4>----- Averages (absentees excluded) -----</h4>
+        ${COLS.map(c => {
+          const v = s.avgs[c];
+          const d = Number.isFinite(v) ? v.toFixed(2) : "N/A";
+          return `<div class="result-row"><span>${c} Average</span><span>${d}</span></div>`;
+        }).join("")}
+        <div class="section-separator"></div>
+      `;
+
+      // THRESHOLD RESULTS
+      html += `
+        <h4>----- Students Scoring ≥ ${tPercent}% of Max Marks -----</h4>
+        ${COLS.map(c => `
+            <div class="result-row">
+              <span>${c}</span>
+              <span>${above[c]} students (${perc[c]}%) — Threshold Marks = ${Number.isFinite(thrMarks[c]) ? thrMarks[c] : 'N/A'}</span>
+            </div>
+        `).join("")}
+      `;
+
+      // ATTAINMENT LEVELS (if already computed)
+      if (att && att.levels && att.levelsByCol) {
+        html += `
+          <div class="section-separator"></div>
+          <h4>===== ATTAINMENT LEVELS =====</h4>
+          ${COLS.map(c => `
+            <div class="result-row">
+              <span>${c}</span>
+              <span>Level ${att.levelsByCol[c]} (based on ${perc[c]}%)</span>
+            </div>
+          `).join("")}
+        `;
+      }
+
+      resultsPrintable.innerHTML = html;
+    }
+
+    // ========= ATTTAINMENT MODAL =========
+    const attainmentModal = document.getElementById("attainmentModal");
+    const levelsCountInput = document.getElementById("levelsCountInput");
+    const levelsGrid = document.getElementById("levelsGrid");
+    const defineLevelsBtn = document.getElementById("defineLevelsBtn");
+
+    function openAttainmentModal() {
+      if (!lastPayload || !lastPayload.percentages) {
+        alert("Please upload marks Excel and generate the report first.");
+        return;
+      }
+      buildLevelRows();
+      attainmentModal.classList.add("open");
+    }
+
+    function closeAttainmentModal() {
+      attainmentModal.classList.remove("open");
+    }
+
+    function buildLevelRows() {
+      const n = Math.max(1, Math.min(6, Number(levelsCountInput.value) || 3));
+      levelsCountInput.value = n;
+      levelsGrid.innerHTML = "";
+
+      for (let i = 1; i <= n; i++) {
+        const row = document.createElement("div");
+        row.className = "level-row";
+        row.innerHTML = `
+          <span>Level ${i}</span>
+          <input type="number" class="lvl-low" placeholder="Low" min="0" max="100">
+          <input type="number" class="lvl-high" placeholder="High" min="0" max="100">
+        `;
+        levelsGrid.appendChild(row);
+      }
+    }
+
+    levelsCountInput.addEventListener("change", buildLevelRows);
+
+    document.getElementById("cancelLevelsBtn").addEventListener("click", () => {
+      closeAttainmentModal();
+    });
+
+    defineLevelsBtn.addEventListener("click", () => {
+      openAttainmentModal();
+    });
+
+    document.getElementById("saveLevelsBtn").addEventListener("click", () => {
+      try {
+        if (!lastPayload || !lastPayload.percentages) {
+          alert("No report data available.");
+          return;
+        }
+
+        const rows = Array.from(levelsGrid.querySelectorAll(".level-row"));
+        if (!rows.length) {
+          alert("Please add at least one level.");
+          return;
+        }
+
+        const levels = [];
+        let prevUpper = -1;
+
+        rows.forEach((row, index) => {
+          const low = Number(row.querySelector(".lvl-low").value);
+          const high = Number(row.querySelector(".lvl-high").value);
+          if (!Number.isFinite(low) || !Number.isFinite(high)) {
+            throw new Error("Please fill both lower and upper bounds for all levels.");
+          }
+          if (low < 0 || high > 100 || low > high) {
+            throw new Error("Bounds must be between 0 and 100, with low ≤ high.");
+          }
+          if (low <= prevUpper) {
+            throw new Error(`Overlap detected: Level ${index + 1} lower bound must be greater than previous upper (${prevUpper}).`);
+          }
+          levels.push({ level: index + 1, low, high });
+          prevUpper = high;
+        });
+
+        // Compute attainment level per column based on percentage of students above threshold
+        const perc = lastPayload.percentages;
+        const levelsByCol = {};
+        for (const c of COLS) {
+          const p = Number(perc[c]) || 0;
+          let assigned = 0;
+          for (const L of levels) {
+            if (p >= L.low && p <= L.high) {
+              assigned = L.level;
+              break;
+            }
+          }
+          levelsByCol[c] = assigned;
+        }
+
+        // Attach to payload and re-render
+        lastPayload.attainment = {
+          levels,
+          levelsByCol,
+        };
+
+        renderReport(lastPayload);
+        saveReportForCourse(activeCourseIndex, lastPayload);
+        setPdfBtnEnabled(true);
+        closeAttainmentModal();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    // ========= SAVE / LOAD REPORT PAYLOAD =========
+    function saveReportForCourse(idx, payload) {
+      try {
+        localStorage.setItem("report_" + idx, JSON.stringify(payload));
+      } catch (e) {
+        console.warn("Could not store report payload", e);
+      }
+    }
+
+    function loadReportForCourse(idx) {
+      const raw = localStorage.getItem("report_" + idx);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function handleViewLastReport(idx) {
+      const payload = loadReportForCourse(idx);
+      if (!payload) {
+        alert("No saved report for this course yet. Please upload marks Excel first.");
+        return;
+      }
+      activeCourseIndex = idx;
+      lastPayload = payload;
+      renderReport(payload);
+      openDrawerForCourse(idx);
+      setPdfBtnEnabled(true);
+    }
+
+    // ========= PDF DOWNLOAD =========
+    const downloadPdfBtn = document.getElementById("downloadPdfBtn");
+
+    function setPdfBtnEnabled(enabled) {
+      if (enabled) {
+        downloadPdfBtn.classList.remove("btn-disabled");
+        downloadPdfBtn.disabled = false;
+      } else {
+        downloadPdfBtn.classList.add("btn-disabled");
+        downloadPdfBtn.disabled = true;
+      }
+    }
+
+    downloadPdfBtn.addEventListener("click", async () => {
+      if (!lastPayload) {
+        alert("No report available. Please upload marks Excel first.");
+        return;
+      }
+      if (!resultsPrintable.innerHTML.trim()) {
+        alert("Report area is empty.");
+        return;
+      }
+
+      // Use html2canvas + jsPDF with multi-page support
+      const { jsPDF } = window.jspdf;
+
+      try {
+        const element = resultsPrintable;
+        const canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          scrollY: -window.scrollY, // ensure consistent capture
+        });
+
+        const imgData = canvas.toDataURL("image/png");
+        const pdf = new jsPDF("p", "pt", "a4");
+
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const marginX = 40;
+        const marginY = 40;
+        const imgWidth = pageWidth - 2 * marginX;
+        const imgHeight = canvas.height * imgWidth / canvas.width;
+
+        let heightLeft = imgHeight;
+        let position = marginY;
+
+        pdf.addImage(imgData, "PNG", marginX, position, imgWidth, imgHeight);
+        heightLeft -= (pageHeight - 2 * marginY);
+
+        while (heightLeft > 0) {
+          pdf.addPage();
+          position = marginY - (imgHeight - heightLeft);
+          pdf.addImage(imgData, "PNG", marginX, position, imgWidth, imgHeight);
+          heightLeft -= (pageHeight - 2 * marginY);
+        }
+
+        const course = courses[activeCourseIndex] || {};
+        const filename = `${(course.name || "Course").replace(/\s+/g, "_")}_Report.pdf`;
+        pdf.save(filename);
+      } catch (err) {
+        console.error(err);
+        alert("Unable to generate PDF. Please try again.");
+      }
+    });
+
+    // ========= INIT =========
+    renderCourses();
+
+    // Listen for cross-tab/localStorage updates so changes in Courses reflect here
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'courses') {
+        // Reload courses list
+        renderCourses();
+
+        // If a report is open and a course is active, re-render with updated passing %
+        if (lastPayload && typeof activeCourseIndex === 'number' && !Number.isNaN(activeCourseIndex)) {
+          const updatedCourse = (loadCourses() || [])[activeCourseIndex];
+          if (updatedCourse) {
+            // recompute thresholds based on new passing percent
+            const newPass = Number((updatedCourse.passingPercent ?? updatedCourse.passPercent ?? updatedCourse.passing) || 0);
+            const recomputed = computeThresholds(lastPayload.summary, newPass);
+            lastPayload.thresholdPercent = newPass;
+            lastPayload.thresholdMarks = recomputed.thresholdMarks;
+            lastPayload.above = recomputed.above;
+            lastPayload.percentages = recomputed.percentages;
+            // Persist and re-render
+            saveReportForCourse(activeCourseIndex, lastPayload);
+            renderReport(lastPayload);
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

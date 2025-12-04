@@ -1,0 +1,173 @@
+/* ---------- GLOBAL RESET ---------- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Poppins', sans-serif;
+}
+
+/* ---------- BACKGROUND ---------- */
+body {
+  min-height: 100vh;
+  background: url('uni-hyderabad-hd.jpg') no-repeat center center/cover;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---------- DARK RED OVERLAY ---------- */
+body::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(161, 14, 29, 0.75), rgba(0, 0, 0, 0.5));
+  z-index: 0;
+}
+
+/* ---------- NAVBAR ---------- */
+.navbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  padding: 10px 40px;
+  justify-content: space-between;
+  z-index: 5;
+}
+
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.navbar .nav-logo {
+  width: 60px;
+  height: 60px;
+}
+
+.navbar h1 {
+  font-size: 1.3rem;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* ---------- LOGIN CARD ---------- */
+.login-card {
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(12px);
+  border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  width: 380px;
+  padding: 45px;
+  text-align: center;
+  color: #fff;
+  transition: 0.4s ease;
+}
+
+.login-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(161, 14, 29, 0.6);
+}
+
+/* ---------- LOGO INSIDE CARD ---------- */
+.login-card .logo {
+  width: 100px;
+  height: 100px;
+  margin-bottom: 10px;
+  object-fit: contain;
+}
+
+/* ---------- HEADING ---------- */
+.login-card h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 25px;
+  color: #fff;
+  letter-spacing: 1px;
+}
+
+/* ---------- INPUT FIELDS ---------- */
+.login-card input {
+  width: 100%;
+  padding: 12px;
+  margin: 10px 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-size: 1rem;
+  outline: none;
+  transition: 0.3s;
+}
+
+.login-card input::placeholder {
+  color: #e0e0e0;
+}
+
+.login-card input:focus {
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+
+/* ---------- BUTTON ---------- */
+.login-card button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #a10e1d;
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.login-card button:hover {
+  background: #800c19;
+}
+
+/* ---------- FOOTER TEXT ---------- */
+.login-card p {
+  margin-top: 20px;
+  font-size: 0.9rem;
+  color: #eaeaea;
+}
+
+/* ---------- FOOTER ---------- */
+footer {
+  position: absolute;
+  bottom: 10px;
+  color: #fff;
+  font-size: 0.85rem;
+  z-index: 2;
+}
+
+/* ---------- RESPONSIVE DESIGN ---------- */
+@media (max-width: 600px) {
+  .login-card {
+    width: 90%;
+    padding: 30px;
+  }
+
+  .navbar h1 {
+    font-size: 1rem;
+  }
+
+  .navbar .nav-logo {
+    width: 45px;
+    height: 45px;
+  }
+}

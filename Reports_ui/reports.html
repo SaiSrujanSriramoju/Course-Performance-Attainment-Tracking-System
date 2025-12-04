@@ -489,6 +489,7 @@
 
       <!-- Footer buttons (UI only, not included in PDF) -->
       <div class="drawer-footer only-ui">
+        <button id="downloadXlsxBtn" class="btn btn-outline btn-disabled" disabled>Download Report (.xlsx)</button>
         <button id="defineLevelsBtn" class="btn btn-primary">Define Attainment Levels</button>
       </div>
     </div>
@@ -602,6 +603,9 @@
           <div class="course-actions">
             <button class="btn btn-grey" data-idx="${idx}" data-role="qp-btn">Upload Question Paper PDF</button>
             <button class="btn btn-primary" data-idx="${idx}" data-role="marks-btn">Upload Marks Excel</button>
+            <button class="btn btn-outline" data-idx="${idx}" data-role="minor2-btn">Upload Minor 2 Excel</button>
+            <button class="btn btn-outline" data-idx="${idx}" data-role="minor3-btn">Upload Minor 3 Excel</button>
+            <button class="btn btn-outline" data-idx="${idx}" data-role="major-btn">Upload Major Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
           </div>
           <p class="helper-text">
@@ -624,6 +628,12 @@
         handleQpUploadClick(idx);
       } else if (role === "marks-btn") {
         handleMarksUploadClick(idx);
+      } else if (role === "minor2-btn") {
+        handleMinorUploadClick(idx, 'minor2');
+      } else if (role === "minor3-btn") {
+        handleMinorUploadClick(idx, 'minor3');
+      } else if (role === "major-btn") {
+        handleMinorUploadClick(idx, 'major');
       } else if (role === "view-last-btn") {
         handleViewLastReport(idx);
       }
@@ -657,6 +667,14 @@
       excelInput.click();
     }
 
+    function handleMinorUploadClick(idx, type) {
+      // type: 'minor2' | 'minor3' | 'major'
+      activeCourseIndex = idx;
+      window._reportsUploadType = type;
+      excelInput.value = "";
+      excelInput.click();
+    }
+
     excelInput.addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -670,42 +688,67 @@
           const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null });
 
           const parsed = normalizeSheet(rows);
-          const summary = computeSummary(parsed);
 
-          currentSummaryWithoutAtt = summary; // save for later
+          // Decide which report type we're generating. Default = standard marks upload
+          const type = window._reportsUploadType || 'marks';
 
-          // threshold percentage comes from Courses module
-          const course = courses[activeCourseIndex] || {};
-          const passPercent = Number(course.passingPercent ?? course.passPercent ?? course.passing ?? 0) || 0;
+          if (type === 'marks') {
+            const summary = computeSummary(parsed);
+            currentSummaryWithoutAtt = summary; // save for later
 
-          const thresholdData = computeThresholds(summary, passPercent);
+            // threshold percentage comes from Courses module
+            const course = courses[activeCourseIndex] || {};
+            const passPercent = Number(course.passingPercent ?? course.passPercent ?? course.passing ?? 0) || 0;
 
-          // Build payload (without attainment yet)
-          const payload = {
-            courseName: course.name || "Course",
-            batch: course.batch || "",
-            passingPercent: passPercent,
-            summary,
-            thresholdPercent: passPercent,
-            thresholdMarks: thresholdData.thresholdMarks,
-            above: thresholdData.above,
-            percentages: thresholdData.percentages,
-            attainment: null,
-          };
+            const thresholdData = computeThresholds(summary, passPercent);
 
-          lastPayload = payload;
-          // Render current report without attainment
-          renderReport(payload);
-          openDrawerForCourse(activeCourseIndex);
+            // Build payload (without attainment yet)
+            const payload = {
+              courseName: course.name || "Course",
+              batch: course.batch || "",
+              passingPercent: passPercent,
+              cols: COLS,
+              summary,
+              thresholdPercent: passPercent,
+              thresholdMarks: thresholdData.thresholdMarks,
+              above: thresholdData.above,
+              percentages: thresholdData.percentages,
+              attainment: null,
+            };
 
-          // Enable "Define Levels" button
-          document.getElementById("defineLevelsBtn").disabled = false;
+            lastPayload = payload;
+            // Render current report without attainment
+            renderReport(payload);
+            openDrawerForCourse(activeCourseIndex);
 
-          // Persist base report (without attainment yet)
-          saveReportForCourse(activeCourseIndex, payload);
+            // Enable "Define Levels" button
+            document.getElementById("defineLevelsBtn").disabled = false;
 
-          // When a fresh report is generated, disable PDF button until attainment is set
-          setPdfBtnEnabled(false);
+            // Persist base report (without attainment yet)
+            saveReportForCourse(activeCourseIndex, payload);
+
+            // When a fresh report is generated, disable PDF button until attainment is set
+            setPdfBtnEnabled(false);
+          } else {
+            // minor2 / minor3 / major — generate a downloadable Excel report for selected COs
+            let cols = [];
+            let label = type;
+            if (type === 'minor2') {
+              cols = ['CO-3', 'CO-4', 'Tot'];
+              label = 'Minor2';
+            } else if (type === 'minor3') {
+              cols = ['CO-5', 'CO-6', 'Tot'];
+              label = 'Minor3';
+            } else if (type === 'major') {
+              cols = ['CO-1','CO-2','CO-3','CO-4','CO-5','CO-6','Tot'];
+              label = 'Major';
+            }
+
+            generateAndDownloadReport(parsed, cols, label);
+          }
+
+          // reset upload type
+          window._reportsUploadType = undefined;
 
         } catch (err) {
           console.error(err);
@@ -730,14 +773,31 @@
       }
       if (headerRowIndex === -1) headerRowIndex = 0;
 
-      const header = rows[headerRowIndex].map(h => (h == null ? "" : String(h).trim()));
+      // Normalize headers to canonical names so files with minor variations
+      // like "CO3", "co 3", "CO-3" are mapped to a common key "CO-3".
+      function canonicalHeader(h) {
+        if (h == null) return "";
+        const s = String(h).trim();
+        if (!s) return "";
+        const low = s.toLowerCase();
+        if (low === ROLL_COL.toLowerCase() || low === "rollno" || low === "roll") return ROLL_COL;
+        if (low === "tot" || low === "total") return "Tot";
+        // match CO variants like "CO3", "co 3", "Co-3", "CO_3"
+        const m = low.match(/^co[\s_\-]?(\d+)$/);
+        if (m) return `CO-${Number(m[1])}`;
+        // also accept formats like "coblah"? otherwise preserve trimmed original
+        return s;
+      }
+
+      const header = rows[headerRowIndex].map(h => canonicalHeader(h));
       const dataRows = rows.slice(headerRowIndex + 1);
 
       const objs = dataRows.map((r) => {
         const obj = {};
         for (let i = 0; i < header.length; i++) {
-          if (!header[i]) continue;
-          obj[header[i]] = r[i] != null ? r[i] : null;
+          const key = header[i];
+          if (!key) continue;
+          obj[key] = r[i] != null ? r[i] : null;
         }
         return obj;
       });
@@ -747,46 +807,50 @@
 
     function computeSummary(parsed) {
       const headers = parsed.header;
-      for (const col of [ROLL_COL, ...COLS]) {
-        if (!headers.includes(col)) {
-          throw new Error(`Missing column: ${col}`);
-        }
-      }
-
+      if (!headers.includes(ROLL_COL)) throw new Error(`Missing column: ${ROLL_COL}`);
       if (!parsed.rows.length) throw new Error("No data rows found");
+
+      // Detect CO columns present in the sheet (CO-1, CO-2, ...)
+      const coCols = headers.filter(h => /^CO-\d+$/i.test(h));
+      const cols = coCols.length ? coCols : COLS;
 
       // First row = max marks
       const maxRow = parsed.rows[0];
       const maxMarks = {};
-      for (const c of COLS) {
+      for (const c of cols) {
         maxMarks[c] = toNumberSafe(maxRow[c]);
       }
 
       // Student rows (skip first row)
-      const studRows = parsed.rows.slice(1).filter(r => looksLikeRoll(r[ROLL_COL]));
+      const parsedStudentRows = parsed.rows.slice(1);
+      const rowsWithRollValue = parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '').length;
+      const studRowsStrict = parsedStudentRows.filter(r => looksLikeRoll(r[ROLL_COL]));
+      // If strict roll-format matching captures most students, use it;
+      // otherwise fall back to any non-empty Roll No (more tolerant for varied formats).
+      const useStrict = studRowsStrict.length >= Math.max(1, Math.floor(rowsWithRollValue / 2));
+      const studRows = useStrict ? studRowsStrict : parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '');
       const totalStudents = studRows.length;
 
       // Attempts per column
       const attempts = {};
-      for (const c of COLS) {
+      for (const c of cols) {
         attempts[c] = studRows.reduce((acc, r) => acc + (attempted(r[c]) ? 1 : 0), 0);
       }
 
-      // Appeared (using Tot if present)
-      let appeared;
-      if (headers.includes("Tot")) {
-        appeared = studRows.reduce((acc, r) => acc + (attempted(r["Tot"]) ? 1 : 0), 0);
-      } else {
-        appeared = studRows.reduce(
-          (acc, r) => acc + ((attempted(r["CO-1"]) || attempted(r["CO-2"])) ? 1 : 0),
-          0
-        );
+      // Appeared: count a student as appeared if they have a non-empty Tot OR
+      // any CO column has an attempted value. This union avoids undercounting
+      // when some columns are blank for absent students.
+      let appeared = 0;
+      for (const r of studRows) {
+        const hasTot = headers.includes("Tot") && attempted(r["Tot"]);
+        const hasAnyCO = cols.some(cc => attempted(r[cc]));
+        if (hasTot || hasAnyCO) appeared += 1;
       }
       const absentees = totalStudents - appeared;
 
       // Averages per column (excluding absentees)
       const avgs = {};
-      for (const c of COLS) {
+      for (const c of cols) {
         const vals = studRows
           .filter(r => attempted(r[c]))
           .map(r => toNumberSafe(r[c]))
@@ -802,7 +866,98 @@
         appeared,
         absentees,
         avgs,
+        // debug helpers
+        parsedRowsCount: parsedStudentRows.length,
+        rowsWithRollValue,
+        matchedByRollCount: studRowsStrict.length,
+        rollMatchingMethod: useStrict ? 'strict' : 'non-empty'
       };
+    }
+
+    // Flexible summary generator for arbitrary CO columns
+    function computeSummaryForCols(parsed, cols) {
+      const headers = parsed.header;
+      if (!parsed.rows.length) throw new Error("No data rows found");
+
+      // Build a tolerant mapping from desired column names to actual header keys
+      const desired = [ ...cols ];
+      const actualHeaders = headers.slice();
+      const desiredToActual = {};
+
+      function normalizeKey(s) {
+        if (s == null) return '';
+        return String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+      }
+
+      const headerNormMap = {};
+      for (const h of actualHeaders) headerNormMap[normalizeKey(h)] = h;
+
+      // ensure Roll No present
+      if (!actualHeaders.some(h => normalizeKey(h) === normalizeKey(ROLL_COL))) {
+        throw new Error(`Missing column: ${ROLL_COL}`);
+      }
+
+      for (const d of desired) {
+        const keyNorm = normalizeKey(d);
+        if (headerNormMap[keyNorm]) {
+          desiredToActual[d] = headerNormMap[keyNorm];
+        } else {
+          // try relaxed CO matching (e.g., CO3 -> CO-3)
+          if (/^co-?\d+$/i.test(d)) {
+            // try to find any header that normalizes to start with 'co' + number
+            const matched = actualHeaders.find(h => normalizeKey(h).startsWith(normalizeKey(d)));
+            if (matched) {
+              desiredToActual[d] = matched;
+              continue;
+            }
+          }
+          throw new Error(`Missing column: ${d}. Detected headers: ${actualHeaders.join(', ')}`);
+        }
+      }
+
+      // First row = max marks
+      const maxRow = parsed.rows[0];
+      const maxMarks = {};
+      for (const d of desired) {
+        const actual = desiredToActual[d];
+        maxMarks[d] = toNumberSafe(maxRow[actual]);
+      }
+
+      // Student rows (skip first row)
+      const parsedStudentRows = parsed.rows.slice(1);
+      const rowsWithRollValue = parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '').length;
+      const studRowsStrict = parsedStudentRows.filter(r => looksLikeRoll(r[ROLL_COL]));
+      const useStrict = studRowsStrict.length >= Math.max(1, Math.floor(rowsWithRollValue / 2));
+      const studRows = useStrict ? studRowsStrict : parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '');
+      const totalStudents = studRows.length;
+
+      // Attempts per column
+      const attempts = {};
+      for (const d of desired) {
+        const actual = desiredToActual[d];
+        attempts[d] = studRows.reduce((acc, r) => acc + (attempted(r[actual]) ? 1 : 0), 0);
+      }
+
+      // Appeared: consider a student appeared if they have Tot OR any CO values
+      // (use mapped header keys). This union improves robustness for real sheets.
+      let appeared = 0;
+      const coActualKeys = desired.filter(d => d !== 'Tot').map(d => desiredToActual[d]).filter(Boolean);
+      for (const r of studRows) {
+        const hasTot = desiredToActual['Tot'] ? attempted(r[desiredToActual['Tot']]) : false;
+        const hasAnyCO = coActualKeys.some(k => attempted(r[k]));
+        if (hasTot || hasAnyCO) appeared += 1;
+      }
+      const absentees = totalStudents - appeared;
+
+      const avgs = {};
+      for (const d of desired) {
+        const actual = desiredToActual[d];
+        const vals = studRows.filter(r => attempted(r[actual])).map(r => toNumberSafe(r[actual])).filter(v => !Number.isNaN(v));
+        avgs[d] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
+      }
+
+      return { maxMarks, studRows, totalStudents, attempts, appeared, absentees, avgs,
+               parsedRowsCount: parsedStudentRows.length, rowsWithRollValue, matchedByRollCount: studRowsStrict.length, rollMatchingMethod: useStrict ? 'strict' : 'non-empty' };
     }
 
     function computeThresholds(summary, thresholdPercent) {
@@ -810,7 +965,14 @@
       const above = {};
       const percentages = {};
 
-      for (const c of COLS) {
+      // Determine which columns to compute thresholds for. Prefer the
+      // columns present in the summary (this handles Minor2/Minor3/Major),
+      // otherwise fall back to the global COLS list.
+      const cols = (summary && summary.maxMarks && Object.keys(summary.maxMarks).length)
+        ? Object.keys(summary.maxMarks)
+        : COLS;
+
+      for (const c of cols) {
         // Use a safe numeric max; if max is not a finite number we preserve NaN
         const rawMax = summary.maxMarks && summary.maxMarks[c];
         const max = Number.isFinite(rawMax) ? rawMax : NaN;
@@ -827,7 +989,7 @@
         const thrMark = Number(((thresholdPercent / 100) * max).toFixed(2));
         thresholdMarks[c] = thrMark;
 
-        const marks = summary.studRows
+        const marks = (Array.isArray(summary.studRows) ? summary.studRows : [])
           .filter(r => attempted(r[c]))
           .map(r => toNumberSafe(r[c]))
           .filter(v => !Number.isNaN(v));
@@ -891,6 +1053,7 @@
       const above = payload.above;
       const perc = payload.percentages;
       const att = payload.attainment;
+      const colsToShow = payload.cols || COLS;
 
       let html = "";
 
@@ -906,6 +1069,12 @@
           </div>
           <div style="font-size:0.88rem;">
             Passing %: ${payload.passingPercent ?? ""}
+          </div>
+          <div style="font-size:0.82rem;margin-top:4px;color:#333;opacity:0.9;">
+            Detected headers: ${escapeHtml((s && s.parsedRowsCount!==undefined) ? Object.keys(s.maxMarks).join(', ') : (payload.cols||COLS).join(', '))}
+          </div>
+          <div style="font-size:0.82rem;margin-top:2px;color:#333;opacity:0.85;">
+            Parsed rows: ${s.parsedRowsCount ?? ''}, Rows with Roll value: ${s.rowsWithRollValue ?? ''}, Rows matching roll pattern: ${s.matchedByRollCount ?? ''}
           </div>
           <div class="section-separator"></div>
         </div>
@@ -923,7 +1092,7 @@
       // MAX MARKS
       html += `
         <h4>----- Maximum Marks -----</h4>
-        ${COLS.map(c => `
+        ${colsToShow.map(c => `
           <div class="result-row">
             <span>${c}</span><span>Max = ${isNaN(s.maxMarks[c]) ? "N/A" : s.maxMarks[c]}</span>
           </div>
@@ -934,7 +1103,7 @@
       // ATTEMPTS
       html += `
         <h4>----- Attempts per column -----</h4>
-        ${COLS.map(c => `
+        ${colsToShow.map(c => `
           <div class="result-row">
             <span>${c}</span><span>${s.attempts[c]}</span>
           </div>
@@ -945,7 +1114,7 @@
       // AVERAGES
       html += `
         <h4>----- Averages (absentees excluded) -----</h4>
-        ${COLS.map(c => {
+        ${colsToShow.map(c => {
           const v = s.avgs[c];
           const d = Number.isFinite(v) ? v.toFixed(2) : "N/A";
           return `<div class="result-row"><span>${c} Average</span><span>${d}</span></div>`;
@@ -956,7 +1125,7 @@
       // THRESHOLD RESULTS
       html += `
         <h4>----- Students Scoring ≥ ${tPercent}% of Max Marks -----</h4>
-        ${COLS.map(c => `
+        ${colsToShow.map(c => `
             <div class="result-row">
               <span>${c}</span>
               <span>${above[c]} students (${perc[c]}%) — Threshold Marks = ${Number.isFinite(thrMarks[c]) ? thrMarks[c] : 'N/A'}</span>
@@ -969,7 +1138,7 @@
         html += `
           <div class="section-separator"></div>
           <h4>===== ATTAINMENT LEVELS =====</h4>
-          ${COLS.map(c => `
+          ${colsToShow.map(c => `
             <div class="result-row">
               <span>${c}</span>
               <span>Level ${att.levelsByCol[c]} (based on ${perc[c]}%)</span>
@@ -979,6 +1148,136 @@
       }
 
       resultsPrintable.innerHTML = html;
+    }
+
+    // ========= GENERATE & DOWNLOAD REPORT (Minor/Major) =========
+    function generateAndDownloadReport(parsed, cols, label) {
+      try {
+        const summary = computeSummaryForCols(parsed, cols);
+
+        const course = courses[activeCourseIndex] || {};
+        const passPercent = Number(course.passingPercent ?? course.passPercent ?? course.passing ?? 0) || 0;
+        const thresholdData = computeThresholds(summary, passPercent);
+
+        // Build payload to show in drawer
+        const payload = {
+          courseName: course.name || 'Course',
+          batch: course.batch || '',
+          passingPercent: passPercent,
+          summary,
+          thresholdPercent: passPercent,
+          thresholdMarks: thresholdData.thresholdMarks,
+          above: thresholdData.above,
+          percentages: thresholdData.percentages,
+          attainment: null
+        };
+
+        lastPayload = payload;
+        // record which columns this payload uses
+        lastPayload.cols = cols;
+        renderReport(payload);
+        openDrawerForCourse(activeCourseIndex);
+
+        // Build workbook but DO NOT auto-download. Store it on lastPayload and enable download button after attainment.
+        const build = buildWorkbookFromPayload(payload, label);
+        lastPayload.pendingWorkbook = build.wb;
+        lastPayload.pendingFilename = build.filename;
+        // leave download disabled until attainment saved by user
+        const dlBtn = document.getElementById('downloadXlsxBtn');
+        if (dlBtn) {
+          dlBtn.classList.add('btn-disabled');
+          dlBtn.disabled = true;
+        }
+
+        // Create worksheet data (simple row array)
+        const outRows = [];
+        outRows.push(['Metric','Value']);
+        outRows.push(['Total Students', summary.totalStudents]);
+        outRows.push(['Appeared', summary.appeared]);
+        outRows.push(['Absent', summary.absentees]);
+        outRows.push([]);
+        outRows.push(['Max Marks','']);
+        for (const c of cols) outRows.push([c, summary.maxMarks[c]]);
+        outRows.push([]);
+        outRows.push(['Attempts','']);
+        for (const c of cols) outRows.push([c, summary.attempts[c]]);
+        outRows.push([]);
+        outRows.push(['Averages','']);
+        for (const c of cols) outRows.push([c, Number.isFinite(summary.avgs[c]) ? summary.avgs[c].toFixed(2) : 'N/A']);
+        outRows.push([]);
+        outRows.push([`Students Scoring >= ${passPercent}% of Max Marks`, '']);
+        for (const c of cols) outRows.push([c, thresholdData.above[c] + ' students (' + thresholdData.percentages[c] + '%) — Threshold Marks = ' + thresholdData.thresholdMarks[c]]);
+
+        // Add student data sheet (flat rows)
+        const studentRows = [];
+        const hdr = Object.keys(parsed.rows[0]).filter(h=>h);
+        studentRows.push(hdr);
+        for (const r of summary.studRows) {
+          const row = hdr.map(h => r[h] == null ? '' : r[h]);
+          studentRows.push(row);
+        }
+
+        const wb = XLSX.utils.book_new();
+        const wsSummary = XLSX.utils.aoa_to_sheet(outRows);
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+        const wsStudents = XLSX.utils.aoa_to_sheet(studentRows);
+        XLSX.utils.book_append_sheet(wb, wsStudents, 'Students');
+
+        const filename = (course.name||'Course').replace(/\s+/g,'_') + '_' + label + '_Report.xlsx';
+        // Persist generated report metadata (payload saved earlier)
+        saveReportForCourse(activeCourseIndex, payload);
+      } catch (err) {
+        alert('Error generating report: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    // Build an XLSX workbook from a payload (includes attainment if present)
+    function buildWorkbookFromPayload(payload, label) {
+      if (!payload || !payload.summary) throw new Error('No payload to build workbook');
+      const s = payload.summary;
+      const cols = payload.cols || COLS;
+
+      const outRows = [];
+      outRows.push(['Metric','Value']);
+      outRows.push(['Total Students', s.totalStudents]);
+      outRows.push(['Appeared', s.appeared]);
+      outRows.push(['Absent', s.absentees]);
+      outRows.push([]);
+      outRows.push(['Max Marks','']);
+      for (const c of cols) outRows.push([c, s.maxMarks[c]]);
+      outRows.push([]);
+      outRows.push(['Attempts','']);
+      for (const c of cols) outRows.push([c, s.attempts[c]]);
+      outRows.push([]);
+      outRows.push(['Averages','']);
+      for (const c of cols) outRows.push([c, Number.isFinite(s.avgs[c]) ? s.avgs[c].toFixed(2) : 'N/A']);
+      outRows.push([]);
+      outRows.push([`Students Scoring ≥ ${payload.thresholdPercent}% of Max Marks`, '']);
+      for (const c of cols) outRows.push([c, (payload.above && payload.percentages) ? (payload.above[c] + ' students (' + payload.percentages[c] + '%) — Threshold Marks = ' + payload.thresholdMarks[c]) : 'N/A']);
+
+      if (payload.attainment && payload.attainment.levelsByCol) {
+        outRows.push([]);
+        outRows.push(['Attainment Levels','']);
+        for (const c of cols) outRows.push([c, 'Level ' + (payload.attainment.levelsByCol[c] || 0) + (payload.percentages && payload.percentages[c] ? (' (based on ' + payload.percentages[c] + '%)') : '')]);
+      }
+
+      // Students sheet
+      const studentRows = [];
+      const hdr = Object.keys(payload.summary.studRows[0] || {}).filter(h=>h);
+      studentRows.push(hdr);
+      for (const r of payload.summary.studRows) {
+        studentRows.push(hdr.map(h => r[h] == null ? '' : r[h]));
+      }
+
+      const wb = XLSX.utils.book_new();
+      const wsSummary = XLSX.utils.aoa_to_sheet(outRows);
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+      const wsStudents = XLSX.utils.aoa_to_sheet(studentRows);
+      XLSX.utils.book_append_sheet(wb, wsStudents, 'Students');
+
+      const filename = (payload.courseName||'Course').replace(/\s+/g,'_') + '_' + (label||'Report') + '_Report.xlsx';
+      return { wb, filename };
     }
 
     // ========= ATTTAINMENT MODAL =========
@@ -1061,8 +1360,9 @@
 
         // Compute attainment level per column based on percentage of students above threshold
         const perc = lastPayload.percentages;
+        const colsForLevels = lastPayload.cols || COLS;
         const levelsByCol = {};
-        for (const c of COLS) {
+        for (const c of colsForLevels) {
           const p = Number(perc[c]) || 0;
           let assigned = 0;
           for (const L of levels) {
@@ -1083,6 +1383,21 @@
         renderReport(lastPayload);
         saveReportForCourse(activeCourseIndex, lastPayload);
         setPdfBtnEnabled(true);
+
+        // Build downloadable workbook (now including attainment) and enable download button
+        try {
+          const build = buildWorkbookFromPayload(lastPayload, lastPayload.courseName || 'Course');
+          lastPayload.pendingWorkbook = build.wb;
+          lastPayload.pendingFilename = build.filename;
+          const dl = document.getElementById('downloadXlsxBtn');
+          if (dl) {
+            dl.classList.remove('btn-disabled');
+            dl.disabled = false;
+          }
+        } catch (err) {
+          console.warn('Could not build workbook after attainment:', err);
+        }
+
         closeAttainmentModal();
       } catch (err) {
         alert(err.message);
@@ -1186,6 +1501,23 @@
         alert("Unable to generate PDF. Please try again.");
       }
     });
+
+    // Download generated XLSX (built after attainment)
+    const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');
+    if (downloadXlsxBtn) {
+      downloadXlsxBtn.addEventListener('click', () => {
+        if (!lastPayload || !lastPayload.pendingWorkbook) {
+          alert('No generated workbook available. Define attainment levels first.');
+          return;
+        }
+        try {
+          XLSX.writeFile(lastPayload.pendingWorkbook, lastPayload.pendingFilename || 'report.xlsx');
+        } catch (err) {
+          console.error('Download failed', err);
+          alert('Download failed: ' + err.message);
+        }
+      });
+    }
 
     // ========= INIT =========
     renderCourses();

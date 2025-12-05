@@ -108,12 +108,13 @@ function loadDashboard() {
 
         if (report) { anyData = true; }
 
-        const avg = report ? (report.summary.avgs["Tot"]?.toFixed(2) || "—") : "—";
-        const threshold = report ? (report.percent["Tot"] || "—") : "—";
+        const avg = report && report.summary && report.summary.avgs && Number.isFinite(report.summary.avgs["Tot"]) ? report.summary.avgs["Tot"].toFixed(2) : "—";
+        const threshold = report && report.percentages && report.percentages["Tot"] !== undefined ? report.percentages["Tot"] + '%' : "—";
 
         let att = "—";
-        if (report && report.attainmentLevel) {
-            att = report.attainmentLevel["Tot"] || "—";
+        if (report && report.attainment && report.attainment.levelsByCol) {
+          const lvl = report.attainment.levelsByCol["Tot"];
+          if (lvl !== undefined && lvl !== null) att = 'Level ' + lvl;
         }
 
         const row = `
@@ -121,7 +122,7 @@ function loadDashboard() {
                 <td>${course.name}</td>
                 <td>${course.batch}</td>
                 <td>${avg}</td>
-                <td>${threshold}%</td>
+                <td>${threshold}</td>
                 <td>${att}</td>
             </tr>
         `;

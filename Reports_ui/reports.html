@@ -459,18 +459,10 @@
     <!-- Course cards are injected here -->
     <section id="coursesArea"></section>
 
-    <!-- Download report button (enabled after a report is generated) -->
-    <div class="download-row">
-      <button id="downloadPdfBtn" class="btn btn-outline btn-disabled" disabled>
-        Download Report as PDF
-      </button>
-    </div>
-
     <footer>© 2025 University of Hyderabad | Faculty Portal</footer>
   </main>
 
   <!-- Hidden file inputs -->
-  <input type="file" id="qpInput" accept="application/pdf" style="display:none;">
   <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none;">
 
   <!-- ========== REPORT DRAWER ========== -->
@@ -490,33 +482,11 @@
       <!-- Footer buttons (UI only, not included in PDF) -->
       <div class="drawer-footer only-ui">
         <button id="downloadXlsxBtn" class="btn btn-outline btn-disabled" disabled>Download Report (.xlsx)</button>
-        <button id="defineLevelsBtn" class="btn btn-primary">Define Attainment Levels</button>
       </div>
     </div>
   </div>
 
-  <!-- ========== ATTAINMENT MODAL ========== -->
-  <div class="modal-backdrop" id="attainmentModal">
-    <div class="modal">
-      <h3>Set Attainment Levels</h3>
-      <p>
-        Enter the percentage ranges for each attainment level.
-        Ranges must be continuous and non-overlapping, between 0 and 100.
-      </p>
-
-      <label for="levelsCountInput">Number of levels</label>
-      <input type="number" id="levelsCountInput" min="1" max="6" value="3">
-
-      <div class="levels-grid" id="levelsGrid">
-        <!-- Level rows injected here -->
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn btn-grey" id="cancelLevelsBtn">Cancel</button>
-        <button class="btn btn-primary" id="saveLevelsBtn">Save Levels</button>
-      </div>
-    </div>
-  </div>
+  <!-- Attainment modal removed: attainment levels are configured in the Courses module -->
 
   <!-- ========== SCRIPT ========== -->
   <script>
@@ -569,7 +539,6 @@
 
     // ========= RENDER COURSES =========
     const coursesArea = document.getElementById("coursesArea");
-    const qpInput = document.getElementById("qpInput");
     const excelInput = document.getElementById("excelInput");
 
     function renderCourses() {
@@ -597,12 +566,10 @@
             <span class="label">Passing %:</span> ${passing || "Not set"}
           </div>
           <p class="course-instructions">
-            1) Upload Question Paper PDF (for record).<br>
-            2) Upload marks Excel (.xlsx) to generate the report.
+            Upload marks Excel (.xlsx) to generate the report.
           </p>
           <div class="course-actions">
-            <button class="btn btn-grey" data-idx="${idx}" data-role="qp-btn">Upload Question Paper PDF</button>
-            <button class="btn btn-primary" data-idx="${idx}" data-role="marks-btn">Upload Marks Excel</button>
+            <button class="btn btn-primary" data-idx="${idx}" data-role="marks-btn">Upload Minor 1 Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="minor2-btn">Upload Minor 2 Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="minor3-btn">Upload Minor 3 Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="major-btn">Upload Major Excel</button>
@@ -625,9 +592,7 @@
       if (Number.isNaN(idx)) return;
 
       const role = btn.dataset.role;
-      if (role === "qp-btn") {
-        handleQpUploadClick(idx);
-      } else if (role === "marks-btn") {
+      if (role === "marks-btn") {
         handleMarksUploadClick(idx);
       } else if (role === "minor2-btn") {
         handleMinorUploadClick(idx, 'minor2');
@@ -642,23 +607,7 @@
       }
     });
 
-    // ========= QUESTION PAPER UPLOAD (no verification) =========
-    let qpTargetIndex = null;
-
-    function handleQpUploadClick(idx) {
-      activeCourseIndex = idx;
-      qpTargetIndex = idx;
-      qpInput.value = "";
-      qpInput.click();
-    }
-
-    qpInput.addEventListener("change", () => {
-      const file = qpInput.files[0];
-      if (!file) return;
-      // We are not verifying; just storing the fact that QP is uploaded.
-      // You can also store the file name in localStorage if needed.
-      alert("Question paper uploaded. Now upload marks Excel.");
-    });
+    // QUESTION PAPER upload removed (handled outside this UI).
 
     // ========= MARKS UPLOAD =========
     let marksTargetIndex = null;
@@ -724,14 +673,30 @@
             renderReport(payload);
             openDrawerForCourse(activeCourseIndex);
 
-            // Enable "Define Levels" button
-            document.getElementById("defineLevelsBtn").disabled = false;
+            // Attainment levels are defined in the Courses module; no per-report definition required.
 
             // Persist base report (without attainment yet)
             saveReportForCourse(activeCourseIndex, payload);
 
-            // When a fresh report is generated, disable PDF button until attainment is set
-            setPdfBtnEnabled(false);
+            // Also persist this main marks upload as Minor1 so final mapping
+            // can include the first minor automatically.
+            try { saveMinorReportForCourse(activeCourseIndex, 'minor1', payload); } catch (e) { console.warn('Could not save minor1 report', e); }
+
+            // Build downloadable workbook and enable download button
+            try {
+              const build = buildWorkbookFromPayload(payload, payload.courseName || 'Course');
+              lastPayload.pendingWorkbook = build.wb;
+              lastPayload.pendingFilename = build.filename;
+              const dlBtn = document.getElementById('downloadXlsxBtn');
+              if (dlBtn) {
+                dlBtn.classList.remove('btn-disabled');
+                dlBtn.disabled = false;
+              }
+            } catch (err) {
+              console.warn('Could not build workbook for main report', err);
+            }
+
+            // PDF download removed
           } else {
             // minor2 / minor3 / major — generate a downloadable Excel report for selected COs
             let cols = [];
@@ -860,7 +825,12 @@
       }
 
       for (const c of effectiveCols) {
-        attempts[c] = studRows.reduce((acc, r) => acc + (attempted(r[c]) ? 1 : 0), 0);
+        // For Tot, always count students who attempted any CO (not rely on Tot cell)
+        if (c === 'Tot' && coCols.length) {
+          attempts[c] = studRows.reduce((acc, r) => acc + (coCols.some(co => attempted(r[co])) ? 1 : 0), 0);
+        } else {
+          attempts[c] = studRows.reduce((acc, r) => acc + (attempted(r[c]) ? 1 : 0), 0);
+        }
       }
 
       // Appeared: prefer CO columns to decide appearance when CO columns
@@ -993,7 +963,12 @@
 
       for (const d of effectiveDesired) {
         const actual = desiredToActual[d] || d;
-        attempts[d] = studRows.reduce((acc, r) => acc + (attempted(r[actual]) ? 1 : 0), 0);
+        // For Tot, always count students who attempted any CO (use mapped CO keys)
+        if (d === 'Tot' && coActualKeys.length) {
+          attempts[d] = studRows.reduce((acc, r) => acc + (coActualKeys.some(k => attempted(r[k])) ? 1 : 0), 0);
+        } else {
+          attempts[d] = studRows.reduce((acc, r) => acc + (attempted(r[actual]) ? 1 : 0), 0);
+        }
       }
 
       // Appeared: prefer CO columns (mapped keys) when available; fall back
@@ -1314,15 +1289,15 @@
         renderReport(payload);
         openDrawerForCourse(activeCourseIndex);
 
-        // Build workbook but DO NOT auto-download. Store it on lastPayload and enable download button after attainment.
+        // Build workbook but DO NOT auto-download. Store it on lastPayload and enable download button.
         const build = buildWorkbookFromPayload(payload, label);
         lastPayload.pendingWorkbook = build.wb;
         lastPayload.pendingFilename = build.filename;
-        // leave download disabled until attainment saved by user
+        // Enable download button so user can download this report
         const dlBtn = document.getElementById('downloadXlsxBtn');
         if (dlBtn) {
-          dlBtn.classList.add('btn-disabled');
-          dlBtn.disabled = true;
+          dlBtn.classList.remove('btn-disabled');
+          dlBtn.disabled = false;
         }
 
         // Create worksheet data (simple row array)
@@ -1416,129 +1391,7 @@
       return { wb, filename };
     }
 
-    // ========= ATTTAINMENT MODAL =========
-    const attainmentModal = document.getElementById("attainmentModal");
-    const levelsCountInput = document.getElementById("levelsCountInput");
-    const levelsGrid = document.getElementById("levelsGrid");
-    const defineLevelsBtn = document.getElementById("defineLevelsBtn");
-
-    function openAttainmentModal() {
-      if (!lastPayload || !lastPayload.percentages) {
-        alert("Please upload marks Excel and generate the report first.");
-        return;
-      }
-      buildLevelRows();
-      attainmentModal.classList.add("open");
-    }
-
-    function closeAttainmentModal() {
-      attainmentModal.classList.remove("open");
-    }
-
-    function buildLevelRows() {
-      const n = Math.max(1, Math.min(6, Number(levelsCountInput.value) || 3));
-      levelsCountInput.value = n;
-      levelsGrid.innerHTML = "";
-
-      for (let i = 1; i <= n; i++) {
-        const row = document.createElement("div");
-        row.className = "level-row";
-        row.innerHTML = `
-          <span>Level ${i}</span>
-          <input type="number" class="lvl-low" placeholder="Low" min="0" max="100">
-          <input type="number" class="lvl-high" placeholder="High" min="0" max="100">
-        `;
-        levelsGrid.appendChild(row);
-      }
-    }
-
-    levelsCountInput.addEventListener("change", buildLevelRows);
-
-    document.getElementById("cancelLevelsBtn").addEventListener("click", () => {
-      closeAttainmentModal();
-    });
-
-    defineLevelsBtn.addEventListener("click", () => {
-      openAttainmentModal();
-    });
-
-    document.getElementById("saveLevelsBtn").addEventListener("click", () => {
-      try {
-        if (!lastPayload || !lastPayload.percentages) {
-          alert("No report data available.");
-          return;
-        }
-
-        const rows = Array.from(levelsGrid.querySelectorAll(".level-row"));
-        if (!rows.length) {
-          alert("Please add at least one level.");
-          return;
-        }
-
-        const levels = [];
-        let prevUpper = -1;
-
-        rows.forEach((row, index) => {
-          const low = Number(row.querySelector(".lvl-low").value);
-          const high = Number(row.querySelector(".lvl-high").value);
-          if (!Number.isFinite(low) || !Number.isFinite(high)) {
-            throw new Error("Please fill both lower and upper bounds for all levels.");
-          }
-          if (low < 0 || high > 100 || low > high) {
-            throw new Error("Bounds must be between 0 and 100, with low ≤ high.");
-          }
-          if (low <= prevUpper) {
-            throw new Error(`Overlap detected: Level ${index + 1} lower bound must be greater than previous upper (${prevUpper}).`);
-          }
-          levels.push({ level: index + 1, low, high });
-          prevUpper = high;
-        });
-
-        // Compute attainment level per column based on percentage of students above threshold
-        const perc = lastPayload.percentages;
-        const colsForLevels = lastPayload.cols || COLS;
-        const levelsByCol = {};
-        for (const c of colsForLevels) {
-          const p = Number(perc[c]) || 0;
-          let assigned = 0;
-          for (const L of levels) {
-            if (p >= L.low && p <= L.high) {
-              assigned = L.level;
-              break;
-            }
-          }
-          levelsByCol[c] = assigned;
-        }
-
-        // Attach to payload and re-render
-        lastPayload.attainment = {
-          levels,
-          levelsByCol,
-        };
-
-        renderReport(lastPayload);
-        saveReportForCourse(activeCourseIndex, lastPayload);
-        setPdfBtnEnabled(true);
-
-        // Build downloadable workbook (now including attainment) and enable download button
-        try {
-          const build = buildWorkbookFromPayload(lastPayload, lastPayload.courseName || 'Course');
-          lastPayload.pendingWorkbook = build.wb;
-          lastPayload.pendingFilename = build.filename;
-          const dl = document.getElementById('downloadXlsxBtn');
-          if (dl) {
-            dl.classList.remove('btn-disabled');
-            dl.disabled = false;
-          }
-        } catch (err) {
-          console.warn('Could not build workbook after attainment:', err);
-        }
-
-        closeAttainmentModal();
-      } catch (err) {
-        alert(err.message);
-      }
-    });
+    // Attainment modal removed: attainment levels must be configured in Courses module.
 
     // ========= FINAL ATTAINMENT MAPPING =========
     // Compute final mapping using minors (internal) and major (external)
@@ -1581,7 +1434,7 @@
       const results = [];
       for (const co of allCOs) {
         // internal: consider minor2 and minor3 only
-        const minorKeys = ['minor2','minor3'];
+        const minorKeys = ['minor1','minor2','minor3'];
         let internalLevel = null;
         const internalLevels = [];
         for (const mk of minorKeys) {
@@ -1708,81 +1561,16 @@
       lastPayload = payload;
       renderReport(payload);
       openDrawerForCourse(idx);
-      setPdfBtnEnabled(true);
     }
 
-    // ========= PDF DOWNLOAD =========
-    const downloadPdfBtn = document.getElementById("downloadPdfBtn");
+    // PDF download functionality removed
 
-    function setPdfBtnEnabled(enabled) {
-      if (enabled) {
-        downloadPdfBtn.classList.remove("btn-disabled");
-        downloadPdfBtn.disabled = false;
-      } else {
-        downloadPdfBtn.classList.add("btn-disabled");
-        downloadPdfBtn.disabled = true;
-      }
-    }
-
-    downloadPdfBtn.addEventListener("click", async () => {
-      if (!lastPayload) {
-        alert("No report available. Please upload marks Excel first.");
-        return;
-      }
-      if (!resultsPrintable.innerHTML.trim()) {
-        alert("Report area is empty.");
-        return;
-      }
-
-      // Use html2canvas + jsPDF with multi-page support
-      const { jsPDF } = window.jspdf;
-
-      try {
-        const element = resultsPrintable;
-        const canvas = await html2canvas(element, {
-          scale: 2,
-          useCORS: true,
-          scrollY: -window.scrollY, // ensure consistent capture
-        });
-
-        const imgData = canvas.toDataURL("image/png");
-        const pdf = new jsPDF("p", "pt", "a4");
-
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        const marginX = 40;
-        const marginY = 40;
-        const imgWidth = pageWidth - 2 * marginX;
-        const imgHeight = canvas.height * imgWidth / canvas.width;
-
-        let heightLeft = imgHeight;
-        let position = marginY;
-
-        pdf.addImage(imgData, "PNG", marginX, position, imgWidth, imgHeight);
-        heightLeft -= (pageHeight - 2 * marginY);
-
-        while (heightLeft > 0) {
-          pdf.addPage();
-          position = marginY - (imgHeight - heightLeft);
-          pdf.addImage(imgData, "PNG", marginX, position, imgWidth, imgHeight);
-          heightLeft -= (pageHeight - 2 * marginY);
-        }
-
-        const course = courses[activeCourseIndex] || {};
-        const filename = `${(course.name || "Course").replace(/\s+/g, "_")}_Report.pdf`;
-        pdf.save(filename);
-      } catch (err) {
-        console.error(err);
-        alert("Unable to generate PDF. Please try again.");
-      }
-    });
-
-    // Download generated XLSX (built after attainment)
+    // Download generated XLSX (available after any report generation)
     const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');
     if (downloadXlsxBtn) {
       downloadXlsxBtn.addEventListener('click', () => {
         if (!lastPayload) {
-          alert('No generated workbook available. Define attainment levels first.');
+          alert('No generated workbook available. Please upload marks Excel first.');
           return;
         }
         try {
@@ -1795,7 +1583,7 @@
             XLSX.writeFile(lastPayload.pendingWorkbook, lastPayload.pendingFilename || 'report.xlsx');
             return;
           }
-          alert('No generated workbook available. Define attainment levels first.');
+          alert('No generated workbook available. Please upload marks Excel first.');
         } catch (err) {
           console.error('Download failed', err);
           alert('Download failed: ' + err.message);

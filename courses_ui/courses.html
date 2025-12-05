@@ -213,7 +213,7 @@
     </div>
 </div>
 
-<input type="file" id="coPoUpload" accept="application/pdf" style="display:none">
+<!-- CO-PO upload removed from UI; CO-PO mapping handled elsewhere -->
 
 <!-- JAVASCRIPT (FULL LOGIC) -->
 <script>
@@ -247,7 +247,6 @@ function loadCourses() {
 
             <button class="btn btn-blue" onclick="editCourse(${index})">Edit</button>
             <button class="btn btn-red" onclick="deleteCourse(${index})">Delete</button>
-            <button class="btn btn-green" onclick="uploadCoPo(${index})">Upload CO-PO PDF</button>
 
             ${c.copoPdf ? `<p>CO-PO PDF: <a href="${c.copoPdf}" download>${c.copoPdfName}</a></p>` : ""}
         `;
@@ -361,22 +360,7 @@ function buildCourseLevelRows(prefill) {
 
 document.getElementById('levelsCount').addEventListener('change', () => buildCourseLevelRows());
 
-function uploadCoPo(index) {
-    let input = document.getElementById("coPoUpload");
-    input.click();
-
-    input.onchange = e => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        let url = URL.createObjectURL(file);
-
-        courses[index].copoPdf = url;
-        courses[index].copoPdfName = file.name;
-
-        saveCourses();
-    };
-}
+// CO-PO upload removed: function removed from UI to simplify workflow
 
 loadCourses();
 

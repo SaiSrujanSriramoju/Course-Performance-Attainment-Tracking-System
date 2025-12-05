@@ -821,6 +821,14 @@
         maxMarks[c] = toNumberSafe(maxRow[c]);
       }
 
+      // If Tot is not present but CO columns exist, synthesize a Tot column
+      // by summing the CO max marks; we'll also compute per-student Tot later.
+      const hasTotHeader = headers.includes('Tot');
+      const includeSyntheticTot = !hasTotHeader && coCols.length > 0;
+      if (includeSyntheticTot) {
+        maxMarks['Tot'] = coCols.reduce((s, cc) => s + (Number.isFinite(maxMarks[cc]) ? maxMarks[cc] : 0), 0);
+      }
+
       // Student rows (skip first row)
       const parsedStudentRows = parsed.rows.slice(1);
       const rowsWithRollValue = parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '').length;
@@ -831,26 +839,46 @@
       const studRows = useStrict ? studRowsStrict : parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '');
       const totalStudents = studRows.length;
 
-      // Attempts per column
+      // Attempts per column (include synthetic Tot if applicable)
       const attempts = {};
-      for (const c of cols) {
+      const effectiveCols = includeSyntheticTot ? [...cols, 'Tot'] : cols.slice();
+
+      // If we're synthesizing Tot, compute per-student Tot now
+      if (includeSyntheticTot) {
+        for (const r of studRows) {
+          let tot = 0;
+          let any = false;
+          for (const cc of coCols) {
+            const v = toNumberSafe(r[cc]);
+            if (!Number.isNaN(v)) { tot += v; any = true; }
+          }
+          if (any) r['Tot'] = tot;
+        }
+      }
+
+      for (const c of effectiveCols) {
         attempts[c] = studRows.reduce((acc, r) => acc + (attempted(r[c]) ? 1 : 0), 0);
       }
 
-      // Appeared: count a student as appeared if they have a non-empty Tot OR
-      // any CO column has an attempted value. This union avoids undercounting
-      // when some columns are blank for absent students.
+      // Appeared: prefer CO columns to decide appearance when CO columns
+      // are present (this matches Attempts per column). Only fall back to
+      // using Tot when no CO columns are available.
       let appeared = 0;
+      const coColsForCount = cols.filter(c => /^CO-\d+$/i.test(c));
       for (const r of studRows) {
+        const hasAnyCO = coColsForCount.length ? coColsForCount.some(cc => attempted(r[cc])) : false;
         const hasTot = headers.includes("Tot") && attempted(r["Tot"]);
-        const hasAnyCO = cols.some(cc => attempted(r[cc]));
-        if (hasTot || hasAnyCO) appeared += 1;
+        if (coColsForCount.length) {
+          if (hasAnyCO) appeared += 1;
+        } else {
+          if (hasTot) appeared += 1;
+        }
       }
       const absentees = totalStudents - appeared;
 
       // Averages per column (excluding absentees)
       const avgs = {};
-      for (const c of cols) {
+      for (const c of effectiveCols) {
         const vals = studRows
           .filter(r => attempted(r[c]))
           .map(r => toNumberSafe(r[c]))
@@ -920,7 +948,18 @@
       const maxMarks = {};
       for (const d of desired) {
         const actual = desiredToActual[d];
-        maxMarks[d] = toNumberSafe(maxRow[actual]);
+        maxMarks[d] = actual ? toNumberSafe(maxRow[actual]) : NaN;
+      }
+
+      // If Tot was requested but not present, and CO columns are available,
+      // synthesize Tot as the sum of CO max marks and later per-student totals.
+      const coActualKeys = desired.filter(d => d !== 'Tot').map(d => desiredToActual[d]).filter(Boolean);
+      let synthesizeTot = false;
+      if (desired.includes('Tot') && !desiredToActual['Tot'] && coActualKeys.length) {
+        maxMarks['Tot'] = coActualKeys.reduce((s, k) => s + (Number.isFinite(maxMarks[normalizeKey(k)]) ? maxMarks[normalizeKey(k)] : (Number.isFinite(maxMarks[k])?maxMarks[k]:0)), 0);
+        // simpler: sum known CO keys' maxMarks
+        maxMarks['Tot'] = coActualKeys.reduce((s,k) => s + (Number.isFinite(maxMarks[k]) ? maxMarks[k] : 0), 0);
+        synthesizeTot = true;
       }
 
       // Student rows (skip first row)
@@ -931,27 +970,46 @@
       const studRows = useStrict ? studRowsStrict : parsedStudentRows.filter(r => r[ROLL_COL] != null && String(r[ROLL_COL]).trim() !== '');
       const totalStudents = studRows.length;
 
-      // Attempts per column
+      // Attempts per column (handle synthetic Tot)
       const attempts = {};
-      for (const d of desired) {
-        const actual = desiredToActual[d];
+      const effectiveDesired = desired.slice();
+      if (synthesizeTot && !effectiveDesired.includes('Tot')) effectiveDesired.push('Tot');
+
+      // If synthesizing Tot, compute per-student Tot now (sum of CO actual keys)
+      if (synthesizeTot) {
+        for (const r of studRows) {
+          let tot = 0;
+          let any = false;
+          for (const k of coActualKeys) {
+            const v = toNumberSafe(r[k]);
+            if (!Number.isNaN(v)) { tot += v; any = true; }
+          }
+          if (any) r['Tot'] = tot;
+        }
+      }
+
+      for (const d of effectiveDesired) {
+        const actual = desiredToActual[d] || d;
         attempts[d] = studRows.reduce((acc, r) => acc + (attempted(r[actual]) ? 1 : 0), 0);
       }
 
-      // Appeared: consider a student appeared if they have Tot OR any CO values
-      // (use mapped header keys). This union improves robustness for real sheets.
+      // Appeared: prefer CO columns (mapped keys) when available; fall back
+      // to Tot only if no CO keys are present.
       let appeared = 0;
-      const coActualKeys = desired.filter(d => d !== 'Tot').map(d => desiredToActual[d]).filter(Boolean);
       for (const r of studRows) {
+        const hasAnyCO = coActualKeys.length ? coActualKeys.some(k => attempted(r[k])) : false;
         const hasTot = desiredToActual['Tot'] ? attempted(r[desiredToActual['Tot']]) : false;
-        const hasAnyCO = coActualKeys.some(k => attempted(r[k]));
-        if (hasTot || hasAnyCO) appeared += 1;
+        if (coActualKeys.length) {
+          if (hasAnyCO) appeared += 1;
+        } else {
+          if (hasTot) appeared += 1;
+        }
       }
       const absentees = totalStudents - appeared;
 
       const avgs = {};
-      for (const d of desired) {
-        const actual = desiredToActual[d];
+      for (const d of effectiveDesired) {
+        const actual = desiredToActual[d] || d;
         const vals = studRows.filter(r => attempted(r[actual])).map(r => toNumberSafe(r[actual])).filter(v => !Number.isNaN(v));
         avgs[d] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
       }
@@ -1031,6 +1089,36 @@
       // If a course is active and has a passingPercent set, prefer that value
       // so reports always reflect the latest passing % entered in Courses module.
       const s = payload.summary;
+      // Defensive: if the summary lacks a Tot column but has CO columns,
+      // synthesize per-student Tot, max Tot and Tot attempts/avgs so the
+      // rest of the rendering and threshold computation can include Tot.
+      if (s && s.maxMarks) {
+        const coKeys = Object.keys(s.maxMarks).filter(k => (/^CO-\d+$/i).test(k));
+        if (coKeys.length && !Object.prototype.hasOwnProperty.call(s.maxMarks, 'Tot')) {
+          // Max Tot = sum of CO max marks (ignore NaN)
+          s.maxMarks['Tot'] = coKeys.reduce((sum, k) => sum + (Number.isFinite(s.maxMarks[k]) ? s.maxMarks[k] : 0), 0);
+
+          // Compute per-student Tot where any CO value exists
+          if (Array.isArray(s.studRows)) {
+            for (const r of s.studRows) {
+              let tot = 0;
+              let any = false;
+              for (const k of coKeys) {
+                const v = toNumberSafe(r[k]);
+                if (!Number.isNaN(v)) { tot += v; any = true; }
+              }
+              if (any) r['Tot'] = tot;
+            }
+          }
+
+          // Attempts and averages for Tot
+          s.attempts = s.attempts || {};
+          s.attempts['Tot'] = Array.isArray(s.studRows) ? s.studRows.reduce((acc, r) => acc + (coKeys.some(k => attempted(r[k])) ? 1 : 0), 0) : 0;
+          s.avgs = s.avgs || {};
+          const totVals = Array.isArray(s.studRows) ? s.studRows.filter(r => coKeys.some(k => attempted(r[k]))).map(r => coKeys.reduce((sum, k) => sum + (toNumberSafe(r[k]) || 0), 0)) : [];
+          s.avgs['Tot'] = totVals.length ? (totVals.reduce((a,b)=>a+b,0) / totVals.length) : NaN;
+        }
+      }
       const currentCourse = (typeof activeCourseIndex === 'number' && !Number.isNaN(activeCourseIndex))
         ? (courses[activeCourseIndex] || null)
         : null;

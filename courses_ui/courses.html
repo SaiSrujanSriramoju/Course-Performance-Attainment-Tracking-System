@@ -201,6 +201,11 @@
         <label>Passing %</label>
         <input type="number" id="passingPercent">
 
+        <label style="margin-top:6px">Attainment Levels (define ranges 0-100)</label>
+        <label>Number of levels</label>
+        <input type="number" id="levelsCount" min="1" max="6" value="3">
+        <div id="levelsDef" style="max-height:200px;overflow:auto;margin-bottom:8px"></div>
+
         <div class="modal-buttons">
             <button class="btn btn-blue" id="saveCourse">Save</button>
             <button class="btn btn-red" onclick="closeModal()">Cancel</button>
@@ -238,6 +243,7 @@ function loadCourses() {
             <h3>${c.name}</h3>
             <p><strong>Batch:</strong> ${c.batch} ${c.startYear}-${c.endYear}</p>
             <p><strong>Passing %:</strong> ${c.passPercent}</p>
+            ${c.attainmentLevels && c.attainmentLevels.length ? `<p><strong>Attainment Levels:</strong> ${c.attainmentLevels.length} levels</p>` : ''}
 
             <button class="btn btn-blue" onclick="editCourse(${index})">Edit</button>
             <button class="btn btn-red" onclick="deleteCourse(${index})">Delete</button>
@@ -256,6 +262,8 @@ document.getElementById("addCourseBtn").onclick = () => {
 };
 
 function openModal() {
+    // build level rows for modal (defaults)
+    buildCourseLevelRows();
     document.getElementById("courseModal").style.display = "flex";
 }
 
@@ -275,12 +283,27 @@ document.getElementById("saveCourse").onclick = () => {
         return;
     }
 
+    // collect levels
+    const lowEls = Array.from(document.querySelectorAll('#levelsDef .lvl-low'));
+    const highEls = Array.from(document.querySelectorAll('#levelsDef .lvl-high'));
+    const levelRows = lowEls.map((el, idx) => ({ level: idx+1, low: Number(el.value), high: Number(highEls[idx].value) }));
+
+    // basic validation for levels: numbers present, 0<=low<=high<=100 and non-overlapping
+    let prevHigh = -1;
+    for (const lr of levelRows) {
+        if (!Number.isFinite(lr.low) || !Number.isFinite(lr.high)) { alert('Fill all level ranges'); return; }
+        if (lr.low < 0 || lr.high > 100 || lr.low > lr.high) { alert('Level ranges must be between 0 and 100 and low ≤ high'); return; }
+        if (lr.low <= prevHigh) { alert('Level ranges must be non-overlapping and increasing'); return; }
+        prevHigh = lr.high;
+    }
+
     const courseObj = {
         name,
         batch,
         startYear: start,
         endYear: end,
         passPercent: pass,
+        attainmentLevels: levelRows,
         copoPdf: null,
         copoPdfName: null
     };
@@ -302,7 +325,13 @@ function editCourse(i) {
     endYear.value = c.endYear;
     passingPercent.value = c.passPercent;
 
+    // prefill attainment level controls if present
     openModal();
+    if (c.attainmentLevels && Array.isArray(c.attainmentLevels)) {
+        const cnt = c.attainmentLevels.length || 3;
+        document.getElementById('levelsCount').value = cnt;
+        buildCourseLevelRows(c.attainmentLevels);
+    }
 }
 
 function deleteCourse(i) {
@@ -311,6 +340,26 @@ function deleteCourse(i) {
         saveCourses();
     }
 }
+
+// Build level definition rows inside the modal. If `prefill` is provided,
+// it should be an array of {level,low,high} objects to populate the inputs.
+function buildCourseLevelRows(prefill) {
+    const container = document.getElementById('levelsDef');
+    container.innerHTML = '';
+    const n = Math.max(1, Math.min(6, Number(document.getElementById('levelsCount').value) || 3));
+    for (let i = 1; i <= n; i++) {
+        const div = document.createElement('div');
+        div.style.display = 'flex';
+        div.style.gap = '8px';
+        div.style.marginBottom = '6px';
+        const lowVal = prefill && prefill[i-1] ? prefill[i-1].low : '';
+        const highVal = prefill && prefill[i-1] ? prefill[i-1].high : '';
+        div.innerHTML = `<div style="width:60px">L${i}</div><input type="number" class="lvl-low" placeholder="Low" min="0" max="100" value="${lowVal}"><input type="number" class="lvl-high" placeholder="High" min="0" max="100" value="${highVal}">`;
+        container.appendChild(div);
+    }
+}
+
+document.getElementById('levelsCount').addEventListener('change', () => buildCourseLevelRows());
 
 function uploadCoPo(index) {
     let input = document.getElementById("coPoUpload");

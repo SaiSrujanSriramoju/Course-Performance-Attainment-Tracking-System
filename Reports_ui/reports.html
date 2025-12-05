@@ -607,6 +607,7 @@
             <button class="btn btn-outline" data-idx="${idx}" data-role="minor3-btn">Upload Minor 3 Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="major-btn">Upload Major Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
+            <button class="btn btn-green" data-idx="${idx}" data-role="final-map-btn">Final Mapping</button>
           </div>
           <p class="helper-text">
             Excel format: first row after header = max marks; following rows = students.
@@ -634,6 +635,8 @@
         handleMinorUploadClick(idx, 'minor3');
       } else if (role === "major-btn") {
         handleMinorUploadClick(idx, 'major');
+      } else if (role === "final-map-btn") {
+        generateFinalAttainmentMapping(idx);
       } else if (role === "view-last-btn") {
         handleViewLastReport(idx);
       }
@@ -1065,6 +1068,33 @@
       return { thresholdMarks, above, percentages };
     }
 
+    // Map a percentage to a level using the levels array [{level,low,high},...]
+    function getLevelFromLevels(levels, pct) {
+      if (!Array.isArray(levels) || !Number.isFinite(pct)) return null;
+      for (const L of levels) {
+        if (pct >= L.low && pct <= L.high) return L.level;
+      }
+      return null;
+    }
+
+    // Compute weighted aggregate percentage across assessments. `weights` is an
+    // object like { minor2:0.2, minor3:0.2, major:0.6 }. `values` is an object
+    // like { minor2: pct, minor3: pct, major: pct } (pct in 0-100). Missing
+    // entries are ignored and weights re-normalized.
+    function computeWeightedAggregate(values, weights) {
+      let sum = 0;
+      let wsum = 0;
+      for (const k of Object.keys(values || {})) {
+        const v = Number(values[k]);
+        const w = Number(weights && weights[k] ? weights[k] : 0);
+        if (!Number.isFinite(v) || !Number.isFinite(w) || w <= 0) continue;
+        sum += v * w;
+        wsum += w;
+      }
+      if (wsum <= 0) return NaN;
+      return Number((sum / wsum).toFixed(2));
+    }
+
     // ========= REPORT RENDERING =========
     const resultsDrawer = document.getElementById("resultsDrawer");
     const resultsPrintable = document.getElementById("resultsPrintable");
@@ -1135,6 +1165,24 @@
       payload.thresholdMarks = recomputed.thresholdMarks;
       payload.above = recomputed.above;
       payload.percentages = recomputed.percentages;
+
+      // If course defines attainment levels, apply them automatically so
+      // users are not prompted for each minor/major. Compute levelsByCol
+      // using the percentages computed above.
+      if (!payload.attainment) payload.attainment = {};
+      if ((!payload.attainment.levels || !Array.isArray(payload.attainment.levels) || !payload.attainment.levels.length) && currentCourse && currentCourse.attainmentLevels) {
+        payload.attainment.levels = currentCourse.attainmentLevels;
+        // compute levelsByCol from percentages
+        const levelsByCol = {};
+        for (const c of Object.keys(payload.percentages || {})) {
+          const p = Number(payload.percentages[c]);
+          const lvl = getLevelFromLevels(payload.attainment.levels, p);
+          levelsByCol[c] = lvl || 0;
+        }
+        payload.attainment.levelsByCol = levelsByCol;
+        // persist this change so downloads include it
+        try { saveReportForCourse(activeCourseIndex, payload); } catch (e) { /* ignore */ }
+      }
 
       const tPercent = payload.thresholdPercent;
       const thrMarks = payload.thresholdMarks;
@@ -1312,8 +1360,8 @@
         XLSX.utils.book_append_sheet(wb, wsStudents, 'Students');
 
         const filename = (course.name||'Course').replace(/\s+/g,'_') + '_' + label + '_Report.xlsx';
-        // Persist generated report metadata (payload saved earlier)
-        saveReportForCourse(activeCourseIndex, payload);
+      // Persist generated minor/major report separately so final mapping can use it
+      try { saveMinorReportForCourse(activeCourseIndex, label.toLowerCase(), payload); } catch (e) { console.warn('Could not save minor report', e); }
       } catch (err) {
         alert('Error generating report: ' + err.message);
         console.error(err);
@@ -1492,12 +1540,151 @@
       }
     });
 
+    // ========= FINAL ATTAINMENT MAPPING =========
+    // Compute final mapping using minors (internal) and major (external)
+    function generateFinalAttainmentMapping(idx) {
+      const course = (loadCourses() || [])[idx];
+      if (!course) {
+        alert('Course not found');
+        return;
+      }
+
+      // Load saved minor/major reports
+      const minors = loadMinorReportsForCourse(idx) || {};
+      if (!minors || (Object.keys(minors).length === 0)) {
+        alert('No Minor/Major reports found for this course. Please upload Minor2/Minor3/Major first.');
+        return;
+      }
+
+      // Build union of COs from minor and major reports
+      const coSet = new Set();
+      for (const k of Object.keys(minors)) {
+        const mr = minors[k];
+        if (mr && mr.percentages) Object.keys(mr.percentages).forEach(c => coSet.add(c));
+      }
+      const allCOs = Array.from(coSet).sort();
+
+      // Course-defined levels (must be provided when adding course)
+      const levels = course.attainmentLevels || null;
+      if (!levels || !Array.isArray(levels) || levels.length === 0) {
+        if (!confirm('No attainment levels defined for this course. Define them now in Courses?')) return;
+        // redirect user to courses page
+        window.location.href = '../courses_ui/courses.html';
+        return;
+      }
+
+      // For each CO compute:
+      // - Internal level: derived from Minor reports (minor2+minor3). We'll average available minors equally.
+      // - External level: derived from Major report percentages.
+      // - Direct = ROUND(internal_level*0.4 + external_level*0.6, 2)
+
+      const results = [];
+      for (const co of allCOs) {
+        // internal: consider minor2 and minor3 only
+        const minorKeys = ['minor2','minor3'];
+        let internalLevel = null;
+        const internalLevels = [];
+        for (const mk of minorKeys) {
+          const mr = minors[mk];
+          if (mr && mr.percentages && Number.isFinite(Number(mr.percentages[co]))) {
+            const pct = Number(mr.percentages[co]);
+            const lvl = getLevelFromLevels(levels, pct);
+            if (lvl) internalLevels.push(lvl);
+          }
+        }
+        if (internalLevels.length) {
+          // average minor levels
+          internalLevel = Number((internalLevels.reduce((a,b)=>a+b,0)/internalLevels.length).toFixed(2));
+        }
+
+        // external: major
+        let externalLevel = null;
+        const mrMajor = minors['major'];
+        if (mrMajor && mrMajor.percentages && Number.isFinite(Number(mrMajor.percentages[co]))) {
+          const pctM = Number(mrMajor.percentages[co]);
+          externalLevel = getLevelFromLevels(levels, pctM);
+        }
+
+        const direct = (Number.isFinite(internalLevel) && Number.isFinite(externalLevel))
+          ? Number(((internalLevel * 0.4) + (externalLevel * 0.6)).toFixed(2))
+          : NaN;
+
+        results.push({ co, internalLevel, externalLevel, direct });
+      }
+
+      // Render final mapping in drawer (separate from minor/major display)
+      const courseName = course.name || 'Course';
+      const html = buildFinalMappingHtml(courseName, results);
+      resultsPrintable.innerHTML = html;
+      drawerCourseTitle.textContent = courseName + ' — Final Attainment Level Mapping';
+      drawerBatchInfo.textContent = course.batch ? `Batch: ${course.batch}` : '';
+      resultsDrawer.classList.add('open');
+
+      // Also store final mapping on a payload for download/export
+      lastPayload = lastPayload || {};
+      lastPayload.finalMapping = { courseName, batch: course.batch || '', rows: results };
+      try {
+        const wb = buildFinalMappingWorkbook(lastPayload.finalMapping);
+        lastPayload.finalMapping.wb = wb.wb;
+        lastPayload.finalMapping.filename = wb.filename;
+      } catch (e) { console.warn('Could not build final mapping workbook', e); }
+    }
+
+    function buildFinalMappingHtml(courseName, rows) {
+      let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div><div class="section-separator"></div></div>`;
+      html += `<h4>Final Attainment Level Mapping</h4>`;
+      html += `<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px">CO</th><th style="padding:6px">Internal</th><th style="padding:6px">External</th><th style="padding:6px">Direct</th></tr></thead><tbody>`;
+      for (const r of rows) {
+        html += `<tr><td style="padding:6px">${escapeHtml(r.co)}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.internalLevel)?r.internalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.externalLevel)?r.externalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.direct)?r.direct:''}</td></tr>`;
+      }
+      html += `</tbody></table>`;
+      // Add small note
+      html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Direct = Internal*0.4 + External*0.6 (rounded to 2 decimals)</div>`;
+      return html;
+    }
+
+    function buildFinalMappingWorkbook(mapping) {
+      // mapping.rows: [{co, internalLevel, externalLevel, direct},...]
+      const rows = [];
+      rows.push(['CO','Internal','External','Direct']);
+      for (const r of mapping.rows) rows.push([r.co, r.internalLevel == null ? '' : r.internalLevel, r.externalLevel == null ? '' : r.externalLevel, r.direct == null ? '' : r.direct]);
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Final_Attainment_Level_Mapping');
+      const filename = (mapping.courseName||'Course').replace(/\s+/g,'_') + '_Final_Attainment_Level_Mapping.xlsx';
+      return { wb, filename };
+    }
+
     // ========= SAVE / LOAD REPORT PAYLOAD =========
     function saveReportForCourse(idx, payload) {
       try {
         localStorage.setItem("report_" + idx, JSON.stringify(payload));
       } catch (e) {
         console.warn("Could not store report payload", e);
+      }
+    }
+
+    // Persist minor/major report payloads separately so final mapping can read them
+    function saveMinorReportForCourse(idx, typeLabel, payload) {
+      try {
+        const key = "report_" + idx + "_minors";
+        const raw = localStorage.getItem(key);
+        const obj = raw ? JSON.parse(raw) : {};
+        obj[String(typeLabel).toLowerCase()] = payload;
+        localStorage.setItem(key, JSON.stringify(obj));
+      } catch (e) {
+        console.warn('Could not store minor report payload', e);
+      }
+    }
+
+    function loadMinorReportsForCourse(idx) {
+      try {
+        const key = "report_" + idx + "_minors";
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) {
+        return null;
       }
     }
 
@@ -1594,12 +1781,21 @@
     const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');
     if (downloadXlsxBtn) {
       downloadXlsxBtn.addEventListener('click', () => {
-        if (!lastPayload || !lastPayload.pendingWorkbook) {
+        if (!lastPayload) {
           alert('No generated workbook available. Define attainment levels first.');
           return;
         }
         try {
-          XLSX.writeFile(lastPayload.pendingWorkbook, lastPayload.pendingFilename || 'report.xlsx');
+          // Prefer final mapping workbook if present
+          if (lastPayload.finalMapping && lastPayload.finalMapping.wb) {
+            XLSX.writeFile(lastPayload.finalMapping.wb, lastPayload.finalMapping.filename || 'final_mapping.xlsx');
+            return;
+          }
+          if (lastPayload.pendingWorkbook) {
+            XLSX.writeFile(lastPayload.pendingWorkbook, lastPayload.pendingFilename || 'report.xlsx');
+            return;
+          }
+          alert('No generated workbook available. Define attainment levels first.');
         } catch (err) {
           console.error('Download failed', err);
           alert('Download failed: ' + err.message);

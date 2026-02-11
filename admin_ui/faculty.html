@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Faculty Management | Admin Panel</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="sidebar.css">
+
+  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <script>
+    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo-section">
+      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <h2>Admin Panel</h2>
+    </div>
+
+    <nav>
+      <a href="dashboard.html">🏠 Dashboard</a>
+      <a href="courses.html">📘 Courses</a>
+      <a href="faculty.html" class="active">👨‍🏫 Faculty</a>
+      <a href="assignments.html">🧩 Assignments</a>
+      <a href="reports.html">📊 Reports</a>
+      <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="content">
+
+    <header>
+      <h1>Faculty Management</h1>
+      <p class="dept">Add and manage faculty details</p>
+    </header>
+
+    <section class="form-card">
+      <form id="facultyForm">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="facultyId">Faculty ID</label>
+            <input type="text" id="facultyId" required>
+          </div>
+          <div class="form-group">
+            <label for="facultyName">Faculty Name</label>
+            <input type="text" id="facultyName" required>
+          </div>
+          <div class="form-group">
+            <label for="facultyEmail">Email</label>
+            <input type="email" id="facultyEmail" required>
+          </div>
+          <div class="form-group">
+            <label for="facultyDept">Department</label>
+            <input type="text" id="facultyDept" required>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-green" id="saveFacultyBtn">Save Faculty</button>
+          <button type="button" class="btn btn-outline" id="resetFacultyBtn">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="data-section">
+      <h2>Faculty List</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Faculty ID</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Department</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="facultyTableBody"></tbody>
+      </table>
+    </section>
+
+    <footer>
+      © 2025 University of Hyderabad | Admin Portal
+    </footer>
+
+  </main>
+
+<script>
+/* ---------------------- LOGOUT ---------------------- */
+function logout() {
+    localStorage.removeItem("adminLoggedIn");
+    localStorage.removeItem("facultyLoggedIn");
+    window.location.href = "../login/index.html";
+}
+
+/* ---------------------- FACULTY STATE ---------------------- */
+// Admin logic differs: use separate localStorage keys from Faculty modules
+let adminFaculty = JSON.parse(localStorage.getItem("admin_faculty")) || [];
+let editingIndex = -1;
+
+const facultyForm = document.getElementById("facultyForm");
+const facultyTableBody = document.getElementById("facultyTableBody");
+
+function saveFaculty() {
+    localStorage.setItem("admin_faculty", JSON.stringify(adminFaculty));
+    renderFaculty();
+}
+
+function resetForm() {
+    facultyForm.reset();
+    editingIndex = -1;
+    document.getElementById("saveFacultyBtn").innerText = "Save Faculty";
+}
+
+function renderFaculty() {
+    facultyTableBody.innerHTML = "";
+
+    if (!adminFaculty.length) {
+        facultyTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No faculty added yet.</td></tr>`;
+        return;
+    }
+
+    adminFaculty.forEach((f, idx) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${f.facultyId}</td>
+          <td>${f.facultyName}</td>
+          <td>${f.facultyEmail}</td>
+          <td>${f.facultyDept}</td>
+          <td>
+            <div class="table-actions">
+              <button class="btn btn-blue" onclick="editFaculty(${idx})">Edit</button>
+              <button class="btn btn-red" onclick="deleteFaculty(${idx})">Delete</button>
+            </div>
+          </td>
+        `;
+        facultyTableBody.appendChild(row);
+    });
+}
+
+facultyForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const facultyObj = {
+        facultyId: document.getElementById("facultyId").value.trim(),
+        facultyName: document.getElementById("facultyName").value.trim(),
+        facultyEmail: document.getElementById("facultyEmail").value.trim(),
+        facultyDept: document.getElementById("facultyDept").value.trim()
+    };
+
+    if (!facultyObj.facultyId || !facultyObj.facultyName || !facultyObj.facultyEmail || !facultyObj.facultyDept) {
+        alert("Please fill all fields");
+        return;
+    }
+
+    if (editingIndex === -1) {
+        adminFaculty.push(facultyObj);
+    } else {
+        adminFaculty[editingIndex] = facultyObj;
+    }
+
+    saveFaculty();
+    resetForm();
+});
+
+function editFaculty(index) {
+    const f = adminFaculty[index];
+    document.getElementById("facultyId").value = f.facultyId;
+    document.getElementById("facultyName").value = f.facultyName;
+    document.getElementById("facultyEmail").value = f.facultyEmail;
+    document.getElementById("facultyDept").value = f.facultyDept;
+
+    editingIndex = index;
+    document.getElementById("saveFacultyBtn").innerText = "Update Faculty";
+}
+
+function deleteFaculty(index) {
+    if (!confirm("Delete this faculty member?")) return;
+
+    const removed = adminFaculty.splice(index, 1)[0];
+    saveFaculty();
+
+    // Admin logic differs: clean up assignments for deleted faculty
+    const assignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
+    const updatedAssignments = assignments.filter(a => a.facultyId !== removed.facultyId);
+    localStorage.setItem("admin_assignments", JSON.stringify(updatedAssignments));
+}
+
+document.getElementById("resetFacultyBtn").addEventListener("click", resetForm);
+
+renderFaculty();
+</script>
+
+</body>
+</html>

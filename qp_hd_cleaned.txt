@@ -1,0 +1,15 @@
+UNIVERSITY OF HYDERABAD
+School of Computer and Information Sciences
+MCA III 2025-26
+Time: 
+1.5 Hour Software Engineering Max. Marks: 20
+Minor-1 (26-08-2025))
+Answer the following Questions
+1. (a) Differentiate between Software and Systems Engineering. List the artifacts of software development
+process (4M)(CO-1)
+(b) Discuss SCRUM framework of software development. Which drawbacks of waterfall model are addressed
+in prototype model (6M)(CO-1)
+2. (a) Describe the requirements engineering process. (4M) (CO-2)
+(b) Differentiate between functional and non-functional requirements (2M) (CO-2)
+(b) Considering the library information system. List your assumptions. Accordingly prepare a list of user stories.
+Also identify tasks of one of the stories. (4M)(CO-2)

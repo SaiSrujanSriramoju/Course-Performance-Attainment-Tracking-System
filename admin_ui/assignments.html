@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assign Faculty | Admin Panel</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="sidebar.css">
+
+  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <script>
+    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo-section">
+      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <h2>Admin Panel</h2>
+    </div>
+
+    <nav>
+      <a href="dashboard.html">🏠 Dashboard</a>
+      <a href="courses.html">📘 Courses</a>
+      <a href="faculty.html">👨‍🏫 Faculty</a>
+      <a href="assignments.html" class="active">🧩 Assignments</a>
+      <a href="reports.html">📊 Reports</a>
+      <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="content">
+
+    <header>
+      <h1>Assign Faculty to Course</h1>
+      <p class="dept">Link faculty members with courses</p>
+    </header>
+
+    <section class="form-card">
+      <form id="assignmentForm">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="courseSelect">Course</label>
+            <select id="courseSelect" required></select>
+          </div>
+          <div class="form-group">
+            <label for="facultySelect">Faculty</label>
+            <select id="facultySelect" required></select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-green">Assign</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="data-section">
+      <h2>Assignments</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Course Code</th>
+            <th>Course Name</th>
+            <th>Faculty</th>
+            <th>Department</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="assignmentTableBody"></tbody>
+      </table>
+    </section>
+
+    <footer>
+      © 2025 University of Hyderabad | Admin Portal
+    </footer>
+
+  </main>
+
+<script>
+/* ---------------------- LOGOUT ---------------------- */
+function logout() {
+    localStorage.removeItem("adminLoggedIn");
+    localStorage.removeItem("facultyLoggedIn");
+    window.location.href = "../login/index.html";
+}
+
+/* ---------------------- ASSIGNMENT STATE ---------------------- */
+// Admin logic differs: use separate localStorage keys from Faculty modules
+const courseSelect = document.getElementById("courseSelect");
+const facultySelect = document.getElementById("facultySelect");
+const assignmentTableBody = document.getElementById("assignmentTableBody");
+
+let adminCourses = JSON.parse(localStorage.getItem("admin_courses")) || [];
+let adminFaculty = JSON.parse(localStorage.getItem("admin_faculty")) || [];
+let adminAssignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
+
+function saveAssignments() {
+    localStorage.setItem("admin_assignments", JSON.stringify(adminAssignments));
+    renderAssignments();
+}
+
+function populateDropdowns() {
+    courseSelect.innerHTML = "";
+    facultySelect.innerHTML = "";
+
+    if (!adminCourses.length) {
+        courseSelect.innerHTML = `<option value="">No courses available</option>`;
+    } else {
+        adminCourses.forEach(c => {
+            const opt = document.createElement("option");
+            opt.value = c.courseCode;
+            opt.textContent = `${c.courseCode} - ${c.courseName}`;
+            courseSelect.appendChild(opt);
+        });
+    }
+
+    if (!adminFaculty.length) {
+        facultySelect.innerHTML = `<option value="">No faculty available</option>`;
+    } else {
+        adminFaculty.forEach(f => {
+            const opt = document.createElement("option");
+            opt.value = f.facultyId;
+            opt.textContent = `${f.facultyName} (${f.facultyId})`;
+            facultySelect.appendChild(opt);
+        });
+    }
+}
+
+function renderAssignments() {
+    assignmentTableBody.innerHTML = "";
+
+    if (!adminAssignments.length) {
+        assignmentTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No assignments created yet.</td></tr>`;
+        return;
+    }
+
+    adminAssignments.forEach((a, idx) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${a.courseCode}</td>
+          <td>${a.courseName}</td>
+          <td>${a.facultyName}</td>
+          <td>${a.facultyDept}</td>
+          <td>
+            <div class="table-actions">
+              <button class="btn btn-red" onclick="deleteAssignment(${idx})">Delete</button>
+            </div>
+          </td>
+        `;
+        assignmentTableBody.appendChild(row);
+    });
+}
+
+function deleteAssignment(index) {
+    if (!confirm("Remove this assignment?")) return;
+    adminAssignments.splice(index, 1);
+    saveAssignments();
+}
+
+const assignmentForm = document.getElementById("assignmentForm");
+assignmentForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const courseCode = courseSelect.value;
+    const facultyId = facultySelect.value;
+
+    if (!courseCode || !facultyId) {
+        alert("Please select both course and faculty");
+        return;
+    }
+
+    const course = adminCourses.find(c => c.courseCode === courseCode);
+    const faculty = adminFaculty.find(f => f.facultyId === facultyId);
+
+    if (!course || !faculty) {
+        alert("Invalid selection");
+        return;
+    }
+
+    const existingIndex = adminAssignments.findIndex(a => a.courseCode === courseCode);
+    const assignmentObj = {
+        courseCode: course.courseCode,
+        courseName: course.courseName,
+        facultyId: faculty.facultyId,
+        facultyName: faculty.facultyName,
+        facultyDept: faculty.facultyDept,
+        facultyEmail: faculty.facultyEmail
+    };
+
+    if (existingIndex !== -1) {
+        adminAssignments[existingIndex] = assignmentObj;
+    } else {
+        adminAssignments.push(assignmentObj);
+    }
+
+    saveAssignments();
+});
+
+populateDropdowns();
+renderAssignments();
+</script>
+
+</body>
+</html>

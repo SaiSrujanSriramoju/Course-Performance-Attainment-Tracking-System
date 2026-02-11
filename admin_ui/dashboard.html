@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard | University of Hyderabad</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="sidebar.css">
+
+  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <script>
+    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+  </script>
+</head>
+
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo-section">
+      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <h2>Admin Panel</h2>
+    </div>
+
+    <nav>
+      <a href="dashboard.html" class="active">🏠 Dashboard</a>
+      <a href="courses.html">📘 Courses</a>
+      <a href="faculty.html">👨‍🏫 Faculty</a>
+      <a href="assignments.html">🧩 Assignments</a>
+      <a href="reports.html">📊 Reports</a>
+      <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="content">
+
+    <header>
+      <h1>Welcome, Admin</h1>
+      <p class="dept">Course Outcome and Attendance Tracking System</p>
+    </header>
+
+    <section class="cards">
+      <div class="card">
+        <h3>Total Courses</h3>
+        <p id="totalCourses">0</p>
+      </div>
+      <div class="card">
+        <h3>Total Faculty</h3>
+        <p id="totalFaculty">0</p>
+      </div>
+      <div class="card">
+        <h3>Total Students</h3>
+        <p id="totalStudents">0</p>
+      </div>
+      <div class="card">
+        <h3>Courses Configured</h3>
+        <p id="coursesConfigured">0</p>
+      </div>
+    </section>
+
+    <section class="data-section">
+      <h2>Configuration Overview</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Course Code</th>
+            <th>Course Name</th>
+            <th>Assigned Faculty</th>
+            <th>Passing Marks</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="adminSummaryBody"></tbody>
+      </table>
+    </section>
+
+    <footer>
+      © 2025 University of Hyderabad | Admin Portal
+    </footer>
+
+  </main>
+
+<script>
+/* ---------------------- LOGOUT ---------------------- */
+function logout() {
+    localStorage.removeItem("adminLoggedIn");
+    localStorage.removeItem("facultyLoggedIn");
+    window.location.href = "../login/index.html";
+}
+
+/* ---------------------- LOAD DASHBOARD DATA ---------------------- */
+function loadAdminDashboard() {
+    // Admin logic differs: use separate localStorage keys from Faculty modules
+    const courses = JSON.parse(localStorage.getItem("admin_courses")) || [];
+    const faculty = JSON.parse(localStorage.getItem("admin_faculty")) || [];
+    const assignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
+
+    const totalStudents = Number(localStorage.getItem("admin_total_students")) || 120;
+
+    document.getElementById("totalCourses").innerText = courses.length;
+    document.getElementById("totalFaculty").innerText = faculty.length;
+    document.getElementById("totalStudents").innerText = totalStudents;
+
+    const assignmentMap = {};
+    assignments.forEach(a => { assignmentMap[a.courseCode] = a; });
+
+    const configuredCount = courses.filter(c => {
+        const assigned = assignmentMap[c.courseCode];
+        const hasPassing = c.passingMarks !== undefined && c.passingMarks !== "";
+        return Boolean(assigned) && hasPassing;
+    }).length;
+
+    document.getElementById("coursesConfigured").innerText = configuredCount;
+
+    const tbody = document.getElementById("adminSummaryBody");
+    tbody.innerHTML = "";
+
+    if (!courses.length) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No courses added yet.</td></tr>`;
+        return;
+    }
+
+    courses.forEach(c => {
+        const assigned = assignmentMap[c.courseCode];
+        const facultyName = assigned ? assigned.facultyName : "Not assigned";
+        const passing = c.passingMarks !== undefined && c.passingMarks !== "" ? c.passingMarks : "Not set";
+        const status = assigned && passing !== "Not set" ? "Configured" : "Pending";
+
+        const row = `
+          <tr>
+            <td>${c.courseCode}</td>
+            <td>${c.courseName}</td>
+            <td>${facultyName}</td>
+            <td>${passing}</td>
+            <td>${status}</td>
+          </tr>
+        `;
+        tbody.innerHTML += row;
+    });
+}
+
+loadAdminDashboard();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Passing Criteria | Admin Panel</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="sidebar.css">
+
+  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <script>
+    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+  </script>
+</head>
+<body>
+  <main class="content">
+    <header>
+      <h1>Passing Criteria Removed</h1>
+      <p class="dept">This feature has been removed from the Admin Panel.</p>
+    </header>
+
+    <section class="form-card">
+      <p>Use Course Management to maintain course details.</p>
+      <div class="form-actions">
+        <a href="dashboard.html" class="btn btn-blue">Go to Dashboard</a>
+        <a href="courses.html" class="btn btn-outline">Go to Courses</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Admin logic differs: passing criteria page removed
+    setTimeout(() => {
+      window.location.href = "dashboard.html";
+    }, 1500);
+  </script>
+</body>
+</html>

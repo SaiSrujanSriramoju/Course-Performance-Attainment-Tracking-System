@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reports | Admin Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="../Reports_ui/reports.css">
+
+  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <script>
+    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+        window.location.href = "../login/index.html";
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Sidebar (same layout as Faculty Reports) -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <h2>Admin Panel</h2>
+    </div>
+
+    <nav>
+      <a href="dashboard.html" class="nav-link"><span class="icon">🏠</span>Dashboard</a>
+      <a href="courses.html" class="nav-link"><span class="icon">📘</span>Courses</a>
+      <a href="faculty.html" class="nav-link"><span class="icon">👨‍🏫</span>Faculty</a>
+      <a href="assignments.html" class="nav-link"><span class="icon">🧩</span>Assignments</a>
+      <a href="reports.html" class="nav-link active"><span class="icon">📊</span>Reports</a>
+      <a href="#" class="nav-link logout" onclick="logout()"><span class="icon">🚪</span>Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main">
+    <div class="page-header">
+      <h1>Reports</h1>
+      <p>Course configuration summary (Admin view)</p>
+    </div>
+
+    <section id="reportCards"></section>
+  </main>
+
+  <script src="reports.js"></script>
+</body>
+</html>

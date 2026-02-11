@@ -292,7 +292,6 @@ a {
     flex: 1;
     padding: 24px 40px;
     overflow-y: auto;
-    margin-left: 260px; /* offset the fixed sidebar */
 }
 
 .page-header {
@@ -594,7 +593,6 @@ a {
     }
     .main {
         padding: 16px 16px 40px;
-        margin-left: 0; /* remove offset on small screens */
     }
     .course-card {
         border-radius: 12px;
@@ -603,4 +601,3 @@ a {
         width: 100%;
     }
 }
-

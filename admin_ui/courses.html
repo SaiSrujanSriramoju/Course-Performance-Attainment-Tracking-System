@@ -109,21 +109,16 @@ function logout() {
 }
 
 /* ---------------------- COURSE STATE ---------------------- */
-// Admin logic differs: use separate localStorage keys from Faculty courses
-let adminCourses = JSON.parse(localStorage.getItem("admin_courses")) || [];
-let editingIndex = -1;
+const API_BASE = "http://localhost:5000/api";
+let adminCourses = [];
+let editingCourseId = null;
 
 const courseForm = document.getElementById("courseForm");
 const coursesTableBody = document.getElementById("coursesTableBody");
 
-function saveCourses() {
-    localStorage.setItem("admin_courses", JSON.stringify(adminCourses));
-    renderCourses();
-}
-
 function resetForm() {
     courseForm.reset();
-    editingIndex = -1;
+  editingCourseId = null;
     document.getElementById("saveCourseBtn").innerText = "Save Course";
 }
 
@@ -138,12 +133,12 @@ function renderCourses() {
     adminCourses.forEach((c, idx) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-          <td>${c.courseCode}</td>
-          <td>${c.courseName}</td>
+          <td>${c.course_code}</td>
+          <td>${c.course_name}</td>
           <td>${c.semester}</td>
-          <td>${c.batchName || "—"}</td>
+          <td>${c.batch_name || "—"}</td>
           <td>${c.credits}</td>
-          <td>${c.passingMarks}</td>
+          <td>${c.passing_marks}</td>
           <td>
             <div class="table-actions">
               <button class="btn btn-blue" onclick="editCourse(${idx})">Edit</button>
@@ -155,61 +150,106 @@ function renderCourses() {
     });
 }
 
-courseForm.addEventListener("submit", (e) => {
+courseForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const courseObj = {
-        courseCode: document.getElementById("courseCode").value.trim(),
-        courseName: document.getElementById("courseName").value.trim(),
-        semester: document.getElementById("semester").value.trim(),
-      batchName: document.getElementById("batchName").value.trim(),
-        credits: document.getElementById("credits").value.trim(),
-        passingMarks: document.getElementById("passingMarks").value.trim()
-    };
+  const courseCode = document.getElementById("courseCode").value.trim();
+  const courseName = document.getElementById("courseName").value.trim();
+  const semester = document.getElementById("semester").value.trim();
+  const batchName = document.getElementById("batchName").value.trim();
+  const creditsValue = document.getElementById("credits").value.trim();
+  const passingMarksValue = document.getElementById("passingMarks").value.trim();
 
-    if (!courseObj.courseCode || !courseObj.courseName || !courseObj.semester || !courseObj.batchName || !courseObj.credits || courseObj.passingMarks === "") {
-        alert("Please fill all fields");
-        return;
+  const credits = parseInt(creditsValue, 10);
+  const passingMarks = parseInt(passingMarksValue, 10);
+
+  if (!courseCode || !courseName || !semester || !batchName || Number.isNaN(credits) || Number.isNaN(passingMarks)) {
+    alert("Please fill all fields");
+    return;
+  }
+
+  const payload = {
+    course_code: courseCode,
+    course_name: courseName,
+    semester,
+    batch_name: batchName,
+    credits,
+    passing_marks: passingMarks
+  };
+
+  try {
+    const url = editingCourseId ? `${API_BASE}/courses/${editingCourseId}` : `${API_BASE}/courses`;
+    const method = editingCourseId ? "PUT" : "POST";
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to save course";
+      alert(message);
+      return;
     }
 
-    if (editingIndex === -1) {
-        adminCourses.push(courseObj);
-    } else {
-        adminCourses[editingIndex] = courseObj;
-    }
-
-    saveCourses();
+    await fetchCourses();
     resetForm();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
 });
 
 function editCourse(index) {
     const c = adminCourses[index];
-    document.getElementById("courseCode").value = c.courseCode;
-    document.getElementById("courseName").value = c.courseName;
+  document.getElementById("courseCode").value = c.course_code;
+  document.getElementById("courseName").value = c.course_name;
     document.getElementById("semester").value = c.semester;
-    document.getElementById("batchName").value = c.batchName || "";
+  document.getElementById("batchName").value = c.batch_name || "";
     document.getElementById("credits").value = c.credits;
-    document.getElementById("passingMarks").value = c.passingMarks;
+  document.getElementById("passingMarks").value = c.passing_marks;
 
-    editingIndex = index;
+  editingCourseId = c.course_id;
     document.getElementById("saveCourseBtn").innerText = "Update Course";
 }
 
-function deleteCourse(index) {
+async function deleteCourse(index) {
     if (!confirm("Delete this course?")) return;
 
-    const removed = adminCourses.splice(index, 1)[0];
-    saveCourses();
-
-    // Admin logic differs: clean up assignments for deleted courses
-    const assignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
-    const updatedAssignments = assignments.filter(a => a.courseCode !== removed.courseCode);
-    localStorage.setItem("admin_assignments", JSON.stringify(updatedAssignments));
+  const course = adminCourses[index];
+  try {
+    const response = await fetch(`${API_BASE}/courses/${course.course_id}`, { method: "DELETE" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to delete course";
+      alert(message);
+      return;
+    }
+    await fetchCourses();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
 }
 
 document.getElementById("resetCourseBtn").addEventListener("click", resetForm);
 
-renderCourses();
+async function fetchCourses() {
+  try {
+    const response = await fetch(`${API_BASE}/courses`);
+    const result = await response.json();
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to load courses";
+      alert(message);
+      return;
+    }
+    adminCourses = result.courses || [];
+    renderCourses();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
+}
+
+fetchCourses();
 </script>
 
 </body>

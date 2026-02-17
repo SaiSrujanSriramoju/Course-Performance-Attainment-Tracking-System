@@ -60,6 +60,10 @@
             <label for="facultyDept">Department</label>
             <input type="text" id="facultyDept" required>
           </div>
+          <div class="form-group">
+            <label for="facultyPassword">Password</label>
+            <input type="password" id="facultyPassword" required>
+          </div>
         </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-green" id="saveFacultyBtn">Save Faculty</button>
@@ -99,21 +103,21 @@ function logout() {
 }
 
 /* ---------------------- FACULTY STATE ---------------------- */
-// Admin logic differs: use separate localStorage keys from Faculty modules
-let adminFaculty = JSON.parse(localStorage.getItem("admin_faculty")) || [];
-let editingIndex = -1;
+const API_BASE = "http://localhost:5000/api";
+let adminFaculty = [];
+let editingFacultyId = null;
 
 const facultyForm = document.getElementById("facultyForm");
 const facultyTableBody = document.getElementById("facultyTableBody");
 
-function saveFaculty() {
-    localStorage.setItem("admin_faculty", JSON.stringify(adminFaculty));
-    renderFaculty();
-}
+const facultyIdInput = document.getElementById("facultyId");
+const facultyPasswordInput = document.getElementById("facultyPassword");
 
 function resetForm() {
     facultyForm.reset();
-    editingIndex = -1;
+  editingFacultyId = null;
+  facultyIdInput.disabled = false;
+  facultyPasswordInput.required = true;
     document.getElementById("saveFacultyBtn").innerText = "Save Faculty";
 }
 
@@ -128,10 +132,10 @@ function renderFaculty() {
     adminFaculty.forEach((f, idx) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-          <td>${f.facultyId}</td>
-          <td>${f.facultyName}</td>
-          <td>${f.facultyEmail}</td>
-          <td>${f.facultyDept}</td>
+          <td>${f.faculty_id}</td>
+          <td>${f.name}</td>
+          <td>${f.email}</td>
+          <td>${f.department}</td>
           <td>
             <div class="table-actions">
               <button class="btn btn-blue" onclick="editFaculty(${idx})">Edit</button>
@@ -143,57 +147,121 @@ function renderFaculty() {
     });
 }
 
-facultyForm.addEventListener("submit", (e) => {
+facultyForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const facultyObj = {
-        facultyId: document.getElementById("facultyId").value.trim(),
-        facultyName: document.getElementById("facultyName").value.trim(),
-        facultyEmail: document.getElementById("facultyEmail").value.trim(),
-        facultyDept: document.getElementById("facultyDept").value.trim()
-    };
+  const facultyId = facultyIdInput.value.trim();
+  const facultyName = document.getElementById("facultyName").value.trim();
+  const facultyEmail = document.getElementById("facultyEmail").value.trim();
+  const facultyDept = document.getElementById("facultyDept").value.trim();
+  const facultyPassword = facultyPasswordInput.value.trim();
 
-    if (!facultyObj.facultyId || !facultyObj.facultyName || !facultyObj.facultyEmail || !facultyObj.facultyDept) {
-        alert("Please fill all fields");
+  if (!facultyId || !facultyName || !facultyEmail || !facultyDept) {
+    alert("Please fill all fields");
+    return;
+  }
+
+  try {
+    if (!editingFacultyId && !facultyPassword) {
+      alert("Please provide a password for new faculty");
+      return;
+    }
+
+    if (editingFacultyId) {
+      const response = await fetch(`${API_BASE}/faculty/${editingFacultyId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: facultyName,
+          email: facultyEmail,
+          department: facultyDept
+        })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        const message = result.message || "Failed to update faculty";
+        alert(message);
         return;
-    }
-
-    if (editingIndex === -1) {
-        adminFaculty.push(facultyObj);
+      }
     } else {
-        adminFaculty[editingIndex] = facultyObj;
+      const response = await fetch(`${API_BASE}/faculty`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          faculty_id: facultyId,
+          name: facultyName,
+          email: facultyEmail,
+          department: facultyDept,
+          password: facultyPassword,
+          first_login: 1
+        })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        const message = result.message || "Failed to create faculty";
+        alert(message);
+        return;
+      }
     }
 
-    saveFaculty();
+    await fetchFaculty();
     resetForm();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
 });
 
 function editFaculty(index) {
     const f = adminFaculty[index];
-    document.getElementById("facultyId").value = f.facultyId;
-    document.getElementById("facultyName").value = f.facultyName;
-    document.getElementById("facultyEmail").value = f.facultyEmail;
-    document.getElementById("facultyDept").value = f.facultyDept;
+  facultyIdInput.value = f.faculty_id;
+  document.getElementById("facultyName").value = f.name;
+  document.getElementById("facultyEmail").value = f.email;
+  document.getElementById("facultyDept").value = f.department;
+  facultyPasswordInput.value = "";
+  facultyPasswordInput.required = false;
 
-    editingIndex = index;
+  editingFacultyId = f.faculty_id;
+  facultyIdInput.disabled = true;
     document.getElementById("saveFacultyBtn").innerText = "Update Faculty";
 }
 
-function deleteFaculty(index) {
+async function deleteFaculty(index) {
     if (!confirm("Delete this faculty member?")) return;
 
-    const removed = adminFaculty.splice(index, 1)[0];
-    saveFaculty();
-
-    // Admin logic differs: clean up assignments for deleted faculty
-    const assignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
-    const updatedAssignments = assignments.filter(a => a.facultyId !== removed.facultyId);
-    localStorage.setItem("admin_assignments", JSON.stringify(updatedAssignments));
+  const faculty = adminFaculty[index];
+  try {
+    const response = await fetch(`${API_BASE}/faculty/${faculty.faculty_id}`, { method: "DELETE" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to delete faculty";
+      alert(message);
+      return;
+    }
+    await fetchFaculty();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
 }
 
 document.getElementById("resetFacultyBtn").addEventListener("click", resetForm);
 
-renderFaculty();
+async function fetchFaculty() {
+  try {
+    const response = await fetch(`${API_BASE}/faculty`);
+    const result = await response.json();
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to load faculty";
+      alert(message);
+      return;
+    }
+    adminFaculty = result.faculty || [];
+    renderFaculty();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
+}
+
+fetchFaculty();
 </script>
 
 </body>

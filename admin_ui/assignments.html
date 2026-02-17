@@ -90,19 +90,14 @@ function logout() {
 }
 
 /* ---------------------- ASSIGNMENT STATE ---------------------- */
-// Admin logic differs: use separate localStorage keys from Faculty modules
+const API_BASE = "http://localhost:5000/api";
 const courseSelect = document.getElementById("courseSelect");
 const facultySelect = document.getElementById("facultySelect");
 const assignmentTableBody = document.getElementById("assignmentTableBody");
 
-let adminCourses = JSON.parse(localStorage.getItem("admin_courses")) || [];
-let adminFaculty = JSON.parse(localStorage.getItem("admin_faculty")) || [];
-let adminAssignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
-
-function saveAssignments() {
-    localStorage.setItem("admin_assignments", JSON.stringify(adminAssignments));
-    renderAssignments();
-}
+let adminCourses = [];
+let adminFaculty = [];
+let adminAssignments = [];
 
 function populateDropdowns() {
     courseSelect.innerHTML = "";
@@ -113,8 +108,8 @@ function populateDropdowns() {
     } else {
         adminCourses.forEach(c => {
             const opt = document.createElement("option");
-            opt.value = c.courseCode;
-            opt.textContent = `${c.courseCode} - ${c.courseName}`;
+        opt.value = c.course_id;
+        opt.textContent = `${c.course_code} - ${c.course_name}`;
             courseSelect.appendChild(opt);
         });
     }
@@ -124,8 +119,8 @@ function populateDropdowns() {
     } else {
         adminFaculty.forEach(f => {
             const opt = document.createElement("option");
-            opt.value = f.facultyId;
-            opt.textContent = `${f.facultyName} (${f.facultyId})`;
+        opt.value = f.faculty_id;
+        opt.textContent = `${f.name} (${f.faculty_id})`;
             facultySelect.appendChild(opt);
         });
     }
@@ -142,10 +137,10 @@ function renderAssignments() {
     adminAssignments.forEach((a, idx) => {
         const row = document.createElement("tr");
         row.innerHTML = `
-          <td>${a.courseCode}</td>
-          <td>${a.courseName}</td>
-          <td>${a.facultyName}</td>
-          <td>${a.facultyDept}</td>
+        <td>${a.course_code}</td>
+        <td>${a.course_name}</td>
+        <td>${a.faculty_name}</td>
+        <td>${a.department}</td>
           <td>
             <div class="table-actions">
               <button class="btn btn-red" onclick="deleteAssignment(${idx})">Delete</button>
@@ -156,53 +151,117 @@ function renderAssignments() {
     });
 }
 
-function deleteAssignment(index) {
+  async function deleteAssignment(index) {
     if (!confirm("Remove this assignment?")) return;
-    adminAssignments.splice(index, 1);
-    saveAssignments();
+
+    const assignment = adminAssignments[index];
+    try {
+      const response = await fetch(`${API_BASE}/assignments/${assignment.id}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        const message = result.message || "Failed to delete assignment";
+        alert(message);
+        return;
+      }
+      await fetchAssignments();
+    } catch (err) {
+      alert("Failed to connect to the server");
+    }
 }
 
 const assignmentForm = document.getElementById("assignmentForm");
-assignmentForm.addEventListener("submit", (e) => {
+assignmentForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const courseCode = courseSelect.value;
-    const facultyId = facultySelect.value;
+  const courseId = courseSelect.value;
+  const facultyId = facultySelect.value;
 
-    if (!courseCode || !facultyId) {
+  if (!courseId || !facultyId) {
         alert("Please select both course and faculty");
         return;
     }
 
-    const course = adminCourses.find(c => c.courseCode === courseCode);
-    const faculty = adminFaculty.find(f => f.facultyId === facultyId);
-
-    if (!course || !faculty) {
-        alert("Invalid selection");
+  try {
+    const existing = adminAssignments.find(a => String(a.course_id) === String(courseId));
+    if (existing) {
+      const removeResponse = await fetch(`${API_BASE}/assignments/${existing.id}`, { method: "DELETE" });
+      const removeResult = await removeResponse.json().catch(() => ({}));
+      if (!removeResponse.ok || removeResult.success === false) {
+        const message = removeResult.message || "Failed to replace assignment";
+        alert(message);
         return;
+      }
     }
 
-    const existingIndex = adminAssignments.findIndex(a => a.courseCode === courseCode);
-    const assignmentObj = {
-        courseCode: course.courseCode,
-        courseName: course.courseName,
-        facultyId: faculty.facultyId,
-        facultyName: faculty.facultyName,
-        facultyDept: faculty.facultyDept,
-        facultyEmail: faculty.facultyEmail
-    };
+    const response = await fetch(`${API_BASE}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        course_id: courseId,
+        faculty_id: facultyId
+      })
+    });
 
-    if (existingIndex !== -1) {
-        adminAssignments[existingIndex] = assignmentObj;
-    } else {
-        adminAssignments.push(assignmentObj);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to create assignment";
+      alert(message);
+      return;
     }
 
-    saveAssignments();
+    await fetchAssignments();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
 });
 
-populateDropdowns();
-renderAssignments();
+async function fetchCourses() {
+  const response = await fetch(`${API_BASE}/courses`);
+  const result = await response.json();
+  if (!response.ok || result.success === false) {
+    const message = result.message || "Failed to load courses";
+    throw new Error(message);
+  }
+  adminCourses = result.courses || [];
+}
+
+async function fetchFaculty() {
+  const response = await fetch(`${API_BASE}/faculty`);
+  const result = await response.json();
+  if (!response.ok || result.success === false) {
+    const message = result.message || "Failed to load faculty";
+    throw new Error(message);
+  }
+  adminFaculty = result.faculty || [];
+}
+
+async function fetchAssignments() {
+  try {
+    const response = await fetch(`${API_BASE}/assignments`);
+    const result = await response.json();
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to load assignments";
+      alert(message);
+      return;
+    }
+    adminAssignments = result.assignments || [];
+    renderAssignments();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
+}
+
+async function initAssignments() {
+  try {
+    await Promise.all([fetchCourses(), fetchFaculty()]);
+    populateDropdowns();
+    await fetchAssignments();
+  } catch (err) {
+    alert(err.message || "Failed to load assignment data");
+  }
+}
+
+initAssignments();
 </script>
 
 </body>

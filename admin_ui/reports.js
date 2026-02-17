@@ -1,55 +1,78 @@
 /* ---------------------- ADMIN REPORTS ---------------------- */
-// Admin logic differs: summarize admin-specific localStorage keys
+const API_BASE = "http://localhost:5000/api";
 
-function loadAdminData() {
-  const courses = JSON.parse(localStorage.getItem("admin_courses")) || [];
-  const assignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
+async function loadAdminData() {
+  const [coursesResponse, assignmentsResponse] = await Promise.all([
+    fetch(`${API_BASE}/courses`),
+    fetch(`${API_BASE}/assignments`)
+  ]);
+
+  const coursesResult = await coursesResponse.json();
+  const assignmentsResult = await assignmentsResponse.json();
+
+  if (!coursesResponse.ok || coursesResult.success === false) {
+    throw new Error(coursesResult.message || "Failed to load courses");
+  }
+  if (!assignmentsResponse.ok || assignmentsResult.success === false) {
+    throw new Error(assignmentsResult.message || "Failed to load assignments");
+  }
+
+  const courses = coursesResult.courses || [];
+  const assignments = assignmentsResult.assignments || [];
 
   const assignmentMap = {};
-  assignments.forEach(a => { assignmentMap[a.courseCode] = a; });
+  assignments.forEach(a => { assignmentMap[a.course_id] = a; });
 
   return { courses, assignmentMap };
 }
 
-function renderAdminReports() {
+async function renderAdminReports() {
   const container = document.getElementById("reportCards");
   if (!container) return;
 
-  const { courses, assignmentMap } = loadAdminData();
-  container.innerHTML = "";
+  try {
+    const { courses, assignmentMap } = await loadAdminData();
+    container.innerHTML = "";
 
-  if (!courses.length) {
-    const empty = document.createElement("div");
-    empty.className = "course-card";
-    empty.innerHTML = "<p>No courses found. Please add courses in Course Management.</p>";
-    container.appendChild(empty);
-    return;
+    if (!courses.length) {
+      const empty = document.createElement("div");
+      empty.className = "course-card";
+      empty.innerHTML = "<p>No courses found. Please add courses in Course Management.</p>";
+      container.appendChild(empty);
+      return;
+    }
+
+    courses.forEach(c => {
+      const assigned = assignmentMap[c.course_id];
+      const passing = c.passing_marks !== undefined && c.passing_marks !== "" ? c.passing_marks : "Not set";
+      const status = assigned ? "Configured" : "Pending";
+
+      const card = document.createElement("div");
+      card.className = "course-card";
+
+      card.innerHTML = `
+        <div class="course-title">${c.course_code} - ${c.course_name}</div>
+        <div class="course-meta">
+          <span class="label">Semester:</span> ${c.semester || "—"}<br>
+          <span class="label">Batch:</span> ${c.batch_name || "—"}<br>
+          <span class="label">Credits:</span> ${c.credits || "—"}
+        </div>
+        <div class="course-meta">
+          <span class="label">Assigned Faculty:</span> ${assigned ? assigned.faculty_name : "Not assigned"}<br>
+          <span class="label">Passing Marks:</span> ${passing}
+        </div>
+        <p class="course-instructions">Configuration Status: <strong>${status}</strong></p>
+      `;
+
+      container.appendChild(card);
+    });
+  } catch (err) {
+    container.innerHTML = "";
+    const error = document.createElement("div");
+    error.className = "course-card";
+    error.innerHTML = `<p>${err.message || "Failed to load reports."}</p>`;
+    container.appendChild(error);
   }
-
-  courses.forEach(c => {
-    const assigned = assignmentMap[c.courseCode];
-    const passing = c.passingMarks !== undefined && c.passingMarks !== "" ? c.passingMarks : "Not set";
-    const status = assigned ? "Configured" : "Pending";
-
-    const card = document.createElement("div");
-    card.className = "course-card";
-
-    card.innerHTML = `
-      <div class="course-title">${c.courseCode} - ${c.courseName}</div>
-      <div class="course-meta">
-        <span class="label">Semester:</span> ${c.semester || "—"}<br>
-        <span class="label">Batch:</span> ${c.batchName || "—"}<br>
-        <span class="label">Credits:</span> ${c.credits || "—"}
-      </div>
-      <div class="course-meta">
-        <span class="label">Assigned Faculty:</span> ${assigned ? assigned.facultyName : "Not assigned"}<br>
-        <span class="label">Passing Marks:</span> ${passing}
-      </div>
-      <p class="course-instructions">Configuration Status: <strong>${status}</strong></p>
-    `;
-
-    container.appendChild(card);
-  });
 }
 
 function logout() {

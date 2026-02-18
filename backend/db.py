@@ -37,7 +37,8 @@ def init_db():
             "batch_name VARCHAR(100), "
             "credits INT, "
             "passing_marks INT, "
-            "syllabus_path VARCHAR(255)"
+            "syllabus_path VARCHAR(255), "
+            "number_of_cos INT"
             ")"
         )
         try:
@@ -47,6 +48,11 @@ def init_db():
                 raise
         try:
             cursor.execute("ALTER TABLE Courses ADD COLUMN syllabus_path VARCHAR(255)")
+        except mysql.connector.Error as exc:
+            if exc.errno != 1060:
+                raise
+        try:
+            cursor.execute("ALTER TABLE Courses ADD COLUMN number_of_cos INT")
         except mysql.connector.Error as exc:
             if exc.errno != 1060:
                 raise
@@ -118,6 +124,46 @@ def init_db():
             "level VARCHAR(50), "
             "calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "FOREIGN KEY (co_id) REFERENCES Course_Outcomes(co_id)"
+            ")"
+        )
+
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS co_attainment ("
+            "id INT AUTO_INCREMENT PRIMARY KEY, "
+            "course_id INT NOT NULL, "
+            "faculty_id VARCHAR(50) NOT NULL, "
+            "co_number INT NOT NULL, "
+            "attainment_value DECIMAL(5,2) NOT NULL, "
+            "UNIQUE KEY uniq_course_faculty_co (course_id, faculty_id, co_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id), "
+            "FOREIGN KEY (faculty_id) REFERENCES Faculty(faculty_id)"
+            ")"
+        )
+
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS co_attainment_levels ("
+            "id INT AUTO_INCREMENT PRIMARY KEY, "
+            "course_id INT NOT NULL, "
+            "faculty_id VARCHAR(50) NOT NULL, "
+            "co_number INT NOT NULL, "
+            "level_number INT NOT NULL, "
+            "lower_limit INT NOT NULL, "
+            "upper_limit INT NOT NULL, "
+            "UNIQUE KEY uniq_course_faculty_co_level (course_id, faculty_id, co_number, level_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id), "
+            "FOREIGN KEY (faculty_id) REFERENCES Faculty(faculty_id)"
+            ")"
+        )
+
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS co_po_matrix ("
+            "id INT AUTO_INCREMENT PRIMARY KEY, "
+            "course_id INT NOT NULL, "
+            "co_number INT NOT NULL, "
+            "po_number INT NOT NULL, "
+            "value INT NOT NULL, "
+            "UNIQUE KEY uniq_course_co_po (course_id, co_number, po_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id)"
             ")"
         )
 

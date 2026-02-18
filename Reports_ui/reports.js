@@ -1,4 +1,5 @@
 // ========= CONFIG =========
+const API_BASE = "http://localhost:5000/api";
 const ROLL_COL = "Roll No";
 const COLS = ["CO-1", "CO-2", "Tot"];
 
@@ -49,8 +50,69 @@ function toNumberSafe(v) {
 const coursesArea = document.getElementById("coursesArea");
 const excelInput = document.getElementById("excelInput");
 
+async function applyBackendAttainment(payload, courseId) {
+  try {
+    payload.attainment = payload.attainment || {};
+    payload.attainment._refreshing = true;
+    const response = await fetch(`${API_BASE}/get_attainment_ranges/${courseId}`, { credentials: "include" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      payload.attainment._refreshing = false;
+      return;
+    }
+
+    const ranges = result.ranges || [];
+    const rangesByCo = {};
+    ranges.forEach((row) => {
+      const coNumber = Number(row.co_number);
+      if (!rangesByCo[coNumber]) rangesByCo[coNumber] = [];
+      rangesByCo[coNumber].push({
+        level: Number(row.level_number),
+        low: Number(row.lower_limit),
+        high: Number(row.upper_limit)
+      });
+    });
+    Object.keys(rangesByCo).forEach((key) => {
+      rangesByCo[key].sort((a, b) => a.level - b.level);
+    });
+
+    const levelsByCol = {};
+    const perc = payload.percentages || {};
+    const cols = payload.cols || [];
+
+    cols.forEach((col) => {
+      if (col.startsWith("CO-")) {
+        const coNumber = Number(col.replace("CO-", ""));
+        const rangesForCo = rangesByCo[coNumber] || [];
+        const pct = Number(perc[col]);
+        const lvl = getLevelFromLevels(rangesForCo, pct);
+        levelsByCol[col] = lvl || 0;
+      }
+    });
+
+    const coLevels = Object.keys(levelsByCol).map((key) => levelsByCol[key]).filter((v) => Number.isFinite(v));
+    if (cols.includes("Tot")) {
+      const avgLevel = coLevels.length ? Number((coLevels.reduce((a, b) => a + b, 0) / coLevels.length).toFixed(2)) : 0;
+      levelsByCol["Tot"] = avgLevel;
+    }
+
+    payload.attainment.levelsByCol = levelsByCol;
+    payload.attainment.backendApplied = true;
+    payload.attainment._refreshing = false;
+    payload.attainment.rangesUpdatedAt = localStorage.getItem(`rangesUpdated_${courseId}`) || payload.attainment.rangesUpdatedAt;
+
+    renderReport(payload);
+  } catch (err) {
+    payload.attainment = payload.attainment || {};
+    payload.attainment._refreshing = false;
+    // ignore
+  }
+}
+
 function renderCourses() {
-  courses = loadCourses();
+  if (!courses.length) {
+    courses = loadCourses();
+  }
   coursesArea.innerHTML = "";
 
   if (!courses.length) {
@@ -84,11 +146,17 @@ function renderCourses() {
         <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
         <button class="btn btn-green" data-idx="${idx}" data-role="final-map-btn">Final Mapping</button>
       </div>
+      <div class="course-instructions" style="margin-top:14px;">CO-PO Matrix</div>
+      <div id="co-po-matrix-${idx}">Loading CO-PO matrix...</div>
+      <div class="course-instructions" style="margin-top:14px;">PO Attainment (Direct)</div>
+      <div id="po-attainment-${idx}">Loading PO attainment...</div>
       <p class="helper-text">
         Excel format: first row after header = max marks; following rows = students.
       </p>
     `;
     coursesArea.appendChild(card);
+
+    loadCoPoSection(c, idx);
   });
 }
 
@@ -114,6 +182,99 @@ coursesArea.addEventListener("click", (e) => {
     handleViewLastReport(idx);
   }
 });
+
+async function fetchAssignedCourses() {
+  const response = await fetch(`${API_BASE}/faculty/courses`, { credentials: "include" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.success === false) {
+    throw new Error(result.message || "Failed to load courses");
+  }
+
+  const mapped = (result.courses || []).map((c) => ({
+    courseId: c.course_id,
+    courseCode: c.course_code,
+    name: c.course_name,
+    batch: c.batch_name || "",
+    passPercent: c.passing_marks,
+  }));
+
+  localStorage.setItem("courses", JSON.stringify(mapped));
+  return mapped;
+}
+
+
+async function loadCoPoSection(course, idx) {
+  const matrixContainer = document.getElementById(`co-po-matrix-${idx}`);
+  const poContainer = document.getElementById(`po-attainment-${idx}`);
+  if (!matrixContainer || !poContainer) return;
+
+  if (!course.courseId) {
+    matrixContainer.innerHTML = "<p>CO-PO matrix not available for this course.</p>";
+    poContainer.innerHTML = "<p>PO attainment not available for this course.</p>";
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/co_po_direct/${course.courseId}`, { credentials: "include" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      throw new Error(result.message || "Failed to load CO-PO matrix");
+    }
+
+    const poHeaders = (result.po_numbers || []).map((po) => `<th>PO${po}</th>`).join("");
+    const matrixRows = (result.co_numbers || []).map((co) => {
+      const cells = (result.po_numbers || []).map((po) => {
+        const val = result.matrix?.[co]?.[po] ?? 0;
+        return `<td>${val}</td>`;
+      }).join("");
+      return `<tr><td>CO${co}</td>${cells}</tr>`;
+    }).join("");
+
+    const avgCells = (result.po_numbers || []).map((po) => {
+      const avg = result.column_averages?.[po] ?? 0;
+      return `<td>${avg}</td>`;
+    }).join("");
+
+    matrixContainer.innerHTML = `
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>CO</th>
+            ${poHeaders}
+          </tr>
+        </thead>
+        <tbody>
+          ${matrixRows || "<tr><td colspan=\"13\">No matrix data available.</td></tr>"}
+          <tr>
+            <td><strong>Average</strong></td>
+            ${avgCells}
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    const poRows = (result.po_attainment || []).map((row) => (
+      `<tr><td>PO${row.po_number}</td><td>${row.attainment}</td></tr>`
+    )).join("");
+
+    poContainer.innerHTML = `
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>PO</th>
+            <th>Attainment Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${poRows || "<tr><td colspan=\"2\">No PO attainment available.</td></tr>"}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    matrixContainer.innerHTML = `<p>${err.message || "Failed to load CO-PO matrix"}</p>`;
+    poContainer.innerHTML = `<p>${err.message || "Failed to load PO attainment"}</p>`;
+  }
+}
 
 // QUESTION PAPER upload removed (handled outside this UI).
 
@@ -634,6 +795,16 @@ function renderReport(payload) {
     ? (courses[activeCourseIndex] || null)
     : null;
 
+  if (currentCourse && currentCourse.courseId && payload.attainment) {
+    const key = `rangesUpdated_${currentCourse.courseId}`;
+    const updatedAt = localStorage.getItem(key);
+    if (updatedAt && payload.attainment.rangesUpdatedAt !== updatedAt) {
+      payload.attainment.backendApplied = false;
+      payload.attainment.rangesUpdatedAt = updatedAt;
+      delete payload.attainment.levelsByCol;
+    }
+  }
+
   const currentPassPercent = (currentCourse)
     ? Number((currentCourse.passingPercent ?? currentCourse.passPercent ?? currentCourse.passing) || 0)
     : Number(payload.passingPercent || payload.thresholdPercent || 0);
@@ -647,22 +818,9 @@ function renderReport(payload) {
   payload.above = recomputed.above;
   payload.percentages = recomputed.percentages;
 
-  // If course defines attainment levels, apply them automatically so
-  // users are not prompted for each minor/major. Compute levelsByCol
-  // using the percentages computed above.
   if (!payload.attainment) payload.attainment = {};
-  if ((!payload.attainment.levels || !Array.isArray(payload.attainment.levels) || !payload.attainment.levels.length) && currentCourse && currentCourse.attainmentLevels) {
-    payload.attainment.levels = currentCourse.attainmentLevels;
-    // compute levelsByCol from percentages
-    const levelsByCol = {};
-    for (const c of Object.keys(payload.percentages || {})) {
-      const p = Number(payload.percentages[c]);
-      const lvl = getLevelFromLevels(payload.attainment.levels, p);
-      levelsByCol[c] = lvl || 0;
-    }
-    payload.attainment.levelsByCol = levelsByCol;
-    // persist this change so downloads include it
-    try { saveReportForCourse(activeCourseIndex, payload); } catch (e) { /* ignore */ }
+  if (currentCourse && currentCourse.courseId && !payload.attainment.backendApplied && !payload.attainment._refreshing) {
+    applyBackendAttainment(payload, currentCourse.courseId);
   }
 
   const tPercent = payload.thresholdPercent;
@@ -751,14 +909,14 @@ function renderReport(payload) {
   `;
 
   // ATTAINMENT LEVELS (if already computed)
-  if (att && att.levels && att.levelsByCol) {
+  if (att && att.levelsByCol) {
     html += `
       <div class="section-separator"></div>
       <h4>===== ATTAINMENT LEVELS =====</h4>
       ${colsToShow.map(c => `
         <div class="result-row">
           <span>${c}</span>
-          <span>Level ${att.levelsByCol[c]} (based on ${perc[c]}%)</span>
+          <span>Level ${att.levelsByCol[c] ?? 0} (based on ${perc[c]}%)</span>
         </div>
       `).join("")}
     `;
@@ -1063,6 +1221,10 @@ function handleViewLastReport(idx) {
     alert("No saved report for this course yet. Please upload marks Excel first.");
     return;
   }
+  if (payload.attainment) {
+    payload.attainment.backendApplied = false;
+    delete payload.attainment.levelsByCol;
+  }
   activeCourseIndex = idx;
   lastPayload = payload;
   renderReport(payload);
@@ -1098,7 +1260,16 @@ if (downloadXlsxBtn) {
 }
 
 // ========= INIT =========
-renderCourses();
+async function initReports() {
+  try {
+    courses = await fetchAssignedCourses();
+  } catch (err) {
+    courses = loadCourses();
+  }
+  renderCourses();
+}
+
+initReports();
 
 // Listen for cross-tab/localStorage updates so changes in Courses reflect here
 window.addEventListener('storage', (e) => {

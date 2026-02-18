@@ -77,6 +77,10 @@
             <input type="number" id="passingMarks" min="0" required>
           </div>
           <div class="form-group">
+            <label for="numberOfCos">Number of COs</label>
+            <input type="number" id="numberOfCos" min="1" required>
+          </div>
+          <div class="form-group">
             <label for="syllabusFile">Syllabus</label>
             <input type="file" id="syllabusFile" name="syllabus" accept=".pdf,.doc,.docx" required>
           </div>
@@ -183,11 +187,13 @@ courseForm.addEventListener("submit", async (e) => {
   const batchName = document.getElementById("batchName").value.trim();
   const creditsValue = document.getElementById("credits").value.trim();
   const passingMarksValue = document.getElementById("passingMarks").value.trim();
+  const numberOfCosValue = document.getElementById("numberOfCos").value.trim();
 
   const credits = parseInt(creditsValue, 10);
   const passingMarks = parseInt(passingMarksValue, 10);
+  const numberOfCos = parseInt(numberOfCosValue, 10);
 
-  if (!courseCode || !courseName || !semester || !batchName || Number.isNaN(credits) || Number.isNaN(passingMarks)) {
+  if (!courseCode || !courseName || !semester || !batchName || Number.isNaN(credits) || Number.isNaN(passingMarks) || Number.isNaN(numberOfCos)) {
     alert("Please fill all fields");
     return;
   }
@@ -204,7 +210,8 @@ courseForm.addEventListener("submit", async (e) => {
         semester,
         batch_name: batchName,
         credits,
-        passing_marks: passingMarks
+        passing_marks: passingMarks,
+        number_of_cos: numberOfCos
       };
       response = await fetch(url, {
         method,
@@ -225,6 +232,7 @@ courseForm.addEventListener("submit", async (e) => {
       formData.append("batch_name", batchName);
       formData.append("credits", credits);
       formData.append("passing_marks", passingMarks);
+      formData.append("number_of_cos", numberOfCos);
       formData.append("syllabus_file", syllabusFile);
 
       response = await fetch(url, {
@@ -256,6 +264,7 @@ function editCourse(index) {
   document.getElementById("batchName").value = c.batch_name || "";
     document.getElementById("credits").value = c.credits;
   document.getElementById("passingMarks").value = c.passing_marks;
+  document.getElementById("numberOfCos").value = c.number_of_cos || "";
 
     editingCourseId = c.course_id;
     document.getElementById("syllabusFile").required = false;

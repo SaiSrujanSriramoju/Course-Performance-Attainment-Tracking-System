@@ -139,6 +139,134 @@
         text-align:right;
     }
 
+    .matrix-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+        margin-top: 10px;
+        border: 1px solid #eee;
+    }
+
+    .matrix-table th,
+    .matrix-table td {
+        border: 1px solid #e6e6e6;
+        padding: 8px 10px;
+        font-size: 0.92rem;
+        text-align: center;
+    }
+
+    .matrix-table th {
+        background: #f7f2f2;
+        color: #7b111a;
+    }
+
+    .syllabus-modal {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.55);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 50;
+    }
+
+    .syllabus-modal.open {
+        display: flex;
+    }
+
+    .syllabus-modal-content {
+        background: #ffffff;
+        width: min(900px, 92vw);
+        height: min(640px, 85vh);
+        border-radius: 12px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .syllabus-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e5e5e5;
+        background: #fafafa;
+    }
+
+    .syllabus-modal-header h3 {
+        font-size: 1rem;
+        color: #a10e1d;
+    }
+
+    .syllabus-close {
+        background: none;
+        border: none;
+        font-size: 1.2rem;
+        cursor: pointer;
+    }
+
+    .syllabus-frame {
+        flex: 1;
+        border: none;
+        width: 100%;
+    }
+
+    .syllabus-error {
+        padding: 12px 14px;
+        color: #b00020;
+        font-size: 0.95rem;
+        display: none;
+    }
+
+    .co-ranges {
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        background: #fafafa;
+    }
+
+    .co-range-block {
+        margin-bottom: 14px;
+        padding-bottom: 12px;
+        border-bottom: 1px dashed #e2e2e2;
+    }
+
+    .co-range-block:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+
+    .co-range-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+
+    .co-range-header label {
+        font-weight: 600;
+    }
+
+    .co-range-header input {
+        width: 90px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #bbb;
+    }
+
+    .co-error {
+        color: #b00020;
+        font-size: 0.85rem;
+        margin-top: 6px;
+        display: none;
+    }
+
 </style>
 
 <script>
@@ -221,6 +349,17 @@
     </div>
 </div>
 
+<div id="syllabusModal" class="syllabus-modal">
+    <div class="syllabus-modal-content">
+        <div class="syllabus-modal-header">
+            <h3>Course Syllabus</h3>
+            <button class="syllabus-close" onclick="closeSyllabusModal()">✕</button>
+        </div>
+        <div id="syllabusError" class="syllabus-error">Unable to load syllabus.</div>
+        <iframe id="syllabusFrame" class="syllabus-frame" title="Syllabus PDF"></iframe>
+    </div>
+</div>
+
 <!-- CO-PO upload removed from UI; CO-PO mapping handled elsewhere -->
 
 <!-- JAVASCRIPT (FULL LOGIC) -->
@@ -260,6 +399,7 @@ function renderCourses() {
         const batchYears = c.startYear && c.endYear ? `${c.startYear}-${c.endYear}` : "";
         const batchLabel = batchYears ? `${c.batch} ${batchYears}` : (c.batch || "—");
         const passLabel = c.passPercent !== undefined && c.passPercent !== "" ? c.passPercent : "—";
+        const courseIdAttr = c.courseId ? `data-course-id="${c.courseId}"` : "";
 
         card.innerHTML = `
             <h3>${c.name}</h3>
@@ -269,11 +409,19 @@ function renderCourses() {
 
             <button class="btn btn-blue" onclick="editCourse(${index})">Edit</button>
             <button class="btn btn-red" onclick="deleteCourse(${index})">Delete</button>
+            <button class="btn btn-green" ${courseIdAttr} onclick="openSyllabusModal(${index})">View Syllabus Copy</button>
+
+            <p style="margin-top:12px;"><strong>Define Attainment Levels</strong></p>
+            <div id="co-ranges-${index}" class="co-ranges">Loading attainment ranges...</div>
+            <button class="btn btn-blue" style="margin-top:8px;" onclick="saveAttainmentRanges(${index})">Save Attainment Ranges</button>
+            <div id="co-range-error-${index}" class="co-error"></div>
 
             ${c.copoPdf ? `<p>CO-PO PDF: <a href="${c.copoPdf}" download>${c.copoPdfName}</a></p>` : ""}
         `;
 
         list.appendChild(card);
+
+        loadAttainmentRanges(c, index);
     });
 }
 
@@ -343,6 +491,279 @@ function deleteCourse(i) {
     alert("Courses are managed by Admin. You can view assigned courses here.");
 }
 
+async function loadAttainmentRanges(course, index) {
+    const container = document.getElementById(`co-ranges-${index}`);
+    if (!container) return;
+
+    if (!course.courseId) {
+        container.innerHTML = "<p>CO list not available for this course.</p>";
+        return;
+    }
+
+    try {
+        const [rangesResponse, coResponse] = await Promise.all([
+            fetch(`${API_BASE}/get_attainment_ranges/${course.courseId}`, { credentials: "include" }),
+            fetch(`${API_BASE}/co/${course.courseId}`, { credentials: "include" })
+        ]);
+
+        const rangesResult = await rangesResponse.json().catch(() => ({}));
+        const coResult = await coResponse.json().catch(() => ({}));
+
+        if (!rangesResponse.ok || rangesResult.success === false) {
+            throw new Error(rangesResult.message || "Failed to load ranges");
+        }
+        if (!coResponse.ok || coResult.success === false) {
+            throw new Error(coResult.message || "Failed to load COs");
+        }
+
+        const ranges = rangesResult.ranges || [];
+        const rangesByCo = {};
+        ranges.forEach((row) => {
+            if (!rangesByCo[row.co_number]) rangesByCo[row.co_number] = [];
+            rangesByCo[row.co_number].push(row);
+        });
+
+        const thresholdsByCo = {};
+        (coResult.outcomes || []).forEach((row) => {
+            thresholdsByCo[row.co_number] = row.threshold_mark ?? "";
+        });
+
+        const coCount = Number(course.numberOfCos) || 0;
+        if (!coCount) {
+            container.innerHTML = "<p>Number of COs not set for this course.</p>";
+            return;
+        }
+
+        const blocks = [];
+        for (let co = 1; co <= coCount; co += 1) {
+            const existing = (rangesByCo[co] || []).sort((a, b) => a.level_number - b.level_number);
+            const levelCount = existing.length || 3;
+            blocks.push(renderCoRangeBlock(index, co, levelCount, existing, thresholdsByCo[co] ?? ""));
+        }
+
+        container.innerHTML = blocks.join("");
+        for (let co = 1; co <= coCount; co += 1) {
+            bindRangeEvents(index, co);
+        }
+    } catch (err) {
+        container.innerHTML = `<p>${err.message || "Failed to load ranges"}</p>`;
+    }
+}
+
+function renderCoRangeBlock(courseIndex, coNumber, levelCount, existing, thresholdMark) {
+    const rows = [];
+    for (let level = 1; level <= levelCount; level += 1) {
+        const entry = existing[level - 1] || {};
+        const lower = entry.lower_limit !== undefined ? entry.lower_limit : (level === 1 ? 0 : "");
+        const upper = entry.upper_limit !== undefined ? entry.upper_limit : (level === levelCount ? 100 : "");
+        const lowerCell = level === 1
+            ? `<input type="number" min="0" max="100" value="${lower}" data-co="${coNumber}" data-level="${level}" data-field="lower">`
+            : `<input type="number" min="0" max="100" value="${lower}" data-co="${coNumber}" data-level="${level}" data-field="lower" readonly>`;
+        const upperAttrs = level === levelCount ? "readonly" : "";
+        const upperValue = level === levelCount ? 100 : upper;
+
+        rows.push(`
+            <tr>
+                <td>${level}</td>
+                <td>${lowerCell}</td>
+                <td><input type="number" min="0" max="100" value="${upperValue}" data-co="${coNumber}" data-level="${level}" data-field="upper" ${upperAttrs}></td>
+            </tr>
+        `);
+    }
+
+    return `
+        <div class="co-range-block" data-course-index="${courseIndex}" data-co-number="${coNumber}">
+            <div class="co-range-header">
+                <label>CO${coNumber}</label>
+                <span>Enter number of attainment levels:</span>
+                <input type="number" min="1" max="6" value="${levelCount}" data-co-level-count="${coNumber}">
+                <button class="btn btn-blue" type="button" onclick="regenerateCoLevels(${courseIndex}, ${coNumber})">Generate</button>
+                <span>Threshold Marks:</span>
+                <input type="number" min="0" value="${thresholdMark}" data-co-threshold="${coNumber}">
+            </div>
+            <table class="matrix-table">
+                <thead>
+                    <tr>
+                        <th>Level</th>
+                        <th>Lower Limit</th>
+                        <th>Upper Limit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.join("")}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function bindRangeEvents(courseIndex, coNumber) {
+    const block = document.querySelector(`.co-range-block[data-course-index="${courseIndex}"][data-co-number="${coNumber}"]`);
+    if (!block) return;
+    const upperInputs = block.querySelectorAll('input[data-field="upper"]');
+    upperInputs.forEach((input) => {
+        input.addEventListener("input", () => updateAutoLower(block));
+    });
+    updateAutoLower(block);
+}
+
+function updateAutoLower(block) {
+    const upperInputs = Array.from(block.querySelectorAll('input[data-field="upper"]'));
+    const lowerInputs = Array.from(block.querySelectorAll('input[data-field="lower"]'));
+    for (let i = 1; i < lowerInputs.length; i += 1) {
+        const prevUpper = Number(upperInputs[i - 1].value);
+        if (Number.isFinite(prevUpper)) {
+            lowerInputs[i].value = prevUpper + 1;
+        }
+    }
+    if (upperInputs.length) {
+        upperInputs[upperInputs.length - 1].value = 100;
+    }
+}
+
+function regenerateCoLevels(courseIndex, coNumber) {
+    const container = document.getElementById(`co-ranges-${courseIndex}`);
+    if (!container) return;
+    const levelInput = container.querySelector(`input[data-co-level-count="${coNumber}"]`);
+    const thresholdInput = container.querySelector(`input[data-co-threshold="${coNumber}"]`);
+    const thresholdValue = thresholdInput ? thresholdInput.value : "";
+    const levelCount = Math.max(1, Math.min(6, Number(levelInput?.value) || 1));
+
+    const blockIndex = courses[courseIndex] ? courseIndex : 0;
+    const newBlock = renderCoRangeBlock(blockIndex, coNumber, levelCount, [], thresholdValue);
+    const oldBlock = container.querySelector(`.co-range-block[data-course-index="${courseIndex}"][data-co-number="${coNumber}"]`);
+    if (oldBlock) {
+        oldBlock.outerHTML = newBlock;
+        bindRangeEvents(courseIndex, coNumber);
+    }
+}
+
+function validateRangesForCourse(courseIndex) {
+    const container = document.getElementById(`co-ranges-${courseIndex}`);
+    const errorEl = document.getElementById(`co-range-error-${courseIndex}`);
+    if (!container || !errorEl) return { valid: false, message: "Missing range UI" };
+
+    const blocks = Array.from(container.querySelectorAll(".co-range-block"));
+    for (const block of blocks) {
+        const coNumber = block.dataset.coNumber;
+        const thresholdInput = block.querySelector('input[data-co-threshold]');
+        const thresholdValue = Number(thresholdInput?.value);
+        if (!Number.isFinite(thresholdValue) || thresholdValue < 0) {
+            return { valid: false, message: `CO${coNumber}: threshold marks required` };
+        }
+        const rows = Array.from(block.querySelectorAll("tbody tr"));
+        let prevUpper = null;
+        for (let i = 0; i < rows.length; i += 1) {
+            const lowerInput = rows[i].querySelector('input[data-field="lower"]');
+            const upperInput = rows[i].querySelector('input[data-field="upper"]');
+            const lower = Number(lowerInput.value);
+            const upper = Number(upperInput.value);
+            if (!Number.isFinite(lower) || !Number.isFinite(upper)) {
+                return { valid: false, message: `CO${coNumber}: fill all ranges` };
+            }
+            if (lower >= upper) {
+                return { valid: false, message: `CO${coNumber}: lower must be less than upper` };
+            }
+            if (lower < 0 || upper > 100) {
+                return { valid: false, message: `CO${coNumber}: ranges must be 0-100` };
+            }
+            if (prevUpper !== null && lower !== prevUpper + 1) {
+                return { valid: false, message: `CO${coNumber}: ranges must be continuous` };
+            }
+            if (i === rows.length - 1 && upper !== 100) {
+                return { valid: false, message: `CO${coNumber}: last upper must be 100` };
+            }
+            prevUpper = upper;
+        }
+    }
+
+    errorEl.style.display = "none";
+    return { valid: true };
+}
+
+async function saveAttainmentRanges(index) {
+    const course = courses[index];
+    const container = document.getElementById(`co-ranges-${index}`);
+    const errorEl = document.getElementById(`co-range-error-${index}`);
+    if (!course || !course.courseId || !container || !errorEl) return;
+
+    const validation = validateRangesForCourse(index);
+    if (!validation.valid) {
+        errorEl.textContent = validation.message || "Invalid ranges";
+        errorEl.style.display = "block";
+        return;
+    }
+
+    const ranges = [];
+    const thresholds = [];
+    const blocks = Array.from(container.querySelectorAll(".co-range-block"));
+    blocks.forEach((block) => {
+        const coNumber = Number(block.dataset.coNumber);
+        const thresholdValue = Number(block.querySelector('input[data-co-threshold]').value);
+        thresholds.push({
+            co_number: coNumber,
+            threshold_mark: thresholdValue
+        });
+        const rows = Array.from(block.querySelectorAll("tbody tr"));
+        rows.forEach((row, idx) => {
+            const lower = Number(row.querySelector('input[data-field="lower"]').value);
+            const upper = Number(row.querySelector('input[data-field="upper"]').value);
+            ranges.push({
+                co_number: coNumber,
+                level_number: idx + 1,
+                lower_limit: lower,
+                upper_limit: upper,
+            });
+        });
+    });
+
+    try {
+        const response = await fetch(`${API_BASE}/save_attainment_ranges`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ course_id: course.courseId, ranges, thresholds })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.success === false) {
+            throw new Error(result.message || "Failed to save ranges");
+        }
+        localStorage.setItem(`rangesUpdated_${course.courseId}`, String(Date.now()));
+        errorEl.style.display = "none";
+        alert("Attainment ranges saved.");
+    } catch (err) {
+        errorEl.textContent = err.message || "Failed to save ranges";
+        errorEl.style.display = "block";
+    }
+}
+
+function openSyllabusModal(index) {
+    const course = courses[index];
+    const modal = document.getElementById("syllabusModal");
+    const frame = document.getElementById("syllabusFrame");
+    const error = document.getElementById("syllabusError");
+
+    error.style.display = "none";
+    frame.src = "";
+
+    if (!course || !course.courseId) {
+        error.textContent = "Syllabus not available for this course.";
+        error.style.display = "block";
+        modal.classList.add("open");
+        return;
+    }
+
+    frame.src = `${API_BASE.replace("/api", "")}/get_syllabus/${course.courseId}`;
+    modal.classList.add("open");
+}
+
+function closeSyllabusModal() {
+    const modal = document.getElementById("syllabusModal");
+    const frame = document.getElementById("syllabusFrame");
+    modal.classList.remove("open");
+    frame.src = "";
+}
+
 // Build level definition rows inside the modal. If `prefill` is provided,
 // it should be an array of {level,low,high} objects to populate the inputs.
 function buildCourseLevelRows(prefill) {
@@ -379,11 +800,14 @@ async function initCourses() {
     try {
         const assigned = await fetchAssignedCourses();
         courses = assigned.map((c) => ({
+            courseId: c.course_id,
+            courseCode: c.course_code,
             name: c.course_name,
             batch: c.batch_name || "",
             startYear: "",
             endYear: "",
             passPercent: c.passing_marks,
+            numberOfCos: c.number_of_cos,
             attainmentLevels: [],
             copoPdf: null,
             copoPdfName: null

@@ -7,11 +7,19 @@
   <link rel="stylesheet" href="dashboard.css">
   <link rel="stylesheet" href="sidebar.css">
 
-  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <!-- Prevent unauthorized access (Admin-only) -->
   <script>
-    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+    (async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.authenticated || result.role !== "admin") {
+          window.location.href = "../login/index.html";
+        }
+      } catch (err) {
         window.location.href = "../login/index.html";
-    }
+      }
+    })();
   </script>
 </head>
 <body>
@@ -19,7 +27,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo-section">
-      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <img src="/faculty/uoh_logo.png" alt="UoH Logo">
       <h2>Admin Panel</h2>
     </div>
 
@@ -68,6 +76,10 @@
             <label for="passingMarks">Passing Marks</label>
             <input type="number" id="passingMarks" min="0" required>
           </div>
+          <div class="form-group">
+            <label for="syllabusFile">Syllabus</label>
+            <input type="file" id="syllabusFile" name="syllabus" accept=".pdf,.doc,.docx" required>
+          </div>
         </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-green" id="saveCourseBtn">Save Course</button>
@@ -87,6 +99,7 @@
             <th>Batch</th>
             <th>Credits</th>
             <th>Passing Marks</th>
+            <th>Syllabus</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -102,14 +115,17 @@
 
 <script>
 /* ---------------------- LOGOUT ---------------------- */
-function logout() {
-    localStorage.removeItem("adminLoggedIn");
-    localStorage.removeItem("facultyLoggedIn");
+async function logout() {
+  try {
+    await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+  } finally {
     window.location.href = "../login/index.html";
+  }
 }
 
 /* ---------------------- COURSE STATE ---------------------- */
 const API_BASE = "http://localhost:5000/api";
+const FILE_BASE = API_BASE.replace("/api", "");
 let adminCourses = [];
 let editingCourseId = null;
 
@@ -118,19 +134,21 @@ const coursesTableBody = document.getElementById("coursesTableBody");
 
 function resetForm() {
     courseForm.reset();
-  editingCourseId = null;
+    editingCourseId = null;
     document.getElementById("saveCourseBtn").innerText = "Save Course";
+    document.getElementById("syllabusFile").required = true;
 }
 
 function renderCourses() {
     coursesTableBody.innerHTML = "";
 
     if (!adminCourses.length) {
-        coursesTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center;">No courses added yet.</td></tr>`;
+      coursesTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No courses added yet.</td></tr>`;
         return;
     }
 
     adminCourses.forEach((c, idx) => {
+        const syllabusUrl = c.syllabus_path ? `${FILE_BASE}/${c.syllabus_path}` : "";
         const row = document.createElement("tr");
         row.innerHTML = `
           <td>${c.course_code}</td>
@@ -139,6 +157,12 @@ function renderCourses() {
           <td>${c.batch_name || "—"}</td>
           <td>${c.credits}</td>
           <td>${c.passing_marks}</td>
+          <td>
+            ${syllabusUrl ? `
+              <a class="btn btn-blue" href="${syllabusUrl}" target="_blank" rel="noreferrer">View</a>
+              <a class="btn btn-outline" href="${syllabusUrl}" download>Download</a>
+            ` : "—"}
+          </td>
           <td>
             <div class="table-actions">
               <button class="btn btn-blue" onclick="editCourse(${idx})">Edit</button>
@@ -168,23 +192,47 @@ courseForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  const payload = {
-    course_code: courseCode,
-    course_name: courseName,
-    semester,
-    batch_name: batchName,
-    credits,
-    passing_marks: passingMarks
-  };
-
   try {
     const url = editingCourseId ? `${API_BASE}/courses/${editingCourseId}` : `${API_BASE}/courses`;
     const method = editingCourseId ? "PUT" : "POST";
-    const response = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    let response;
+
+    if (editingCourseId) {
+      const payload = {
+        course_code: courseCode,
+        course_name: courseName,
+        semester,
+        batch_name: batchName,
+        credits,
+        passing_marks: passingMarks
+      };
+      response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+    } else {
+      const syllabusFile = document.getElementById("syllabusFile").files[0];
+      if (!syllabusFile) {
+        alert("Please upload a syllabus file");
+        return;
+      }
+      const formData = new FormData();
+      formData.append("course_code", courseCode);
+      formData.append("course_name", courseName);
+      formData.append("semester", semester);
+      formData.append("batch_name", batchName);
+      formData.append("credits", credits);
+      formData.append("passing_marks", passingMarks);
+      formData.append("syllabus_file", syllabusFile);
+
+      response = await fetch(url, {
+        method,
+        credentials: "include",
+        body: formData
+      });
+    }
 
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.success === false) {
@@ -209,7 +257,8 @@ function editCourse(index) {
     document.getElementById("credits").value = c.credits;
   document.getElementById("passingMarks").value = c.passing_marks;
 
-  editingCourseId = c.course_id;
+    editingCourseId = c.course_id;
+    document.getElementById("syllabusFile").required = false;
     document.getElementById("saveCourseBtn").innerText = "Update Course";
 }
 
@@ -218,7 +267,10 @@ async function deleteCourse(index) {
 
   const course = adminCourses[index];
   try {
-    const response = await fetch(`${API_BASE}/courses/${course.course_id}`, { method: "DELETE" });
+    const response = await fetch(`${API_BASE}/courses/${course.course_id}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.success === false) {
       const message = result.message || "Failed to delete course";
@@ -235,7 +287,7 @@ document.getElementById("resetCourseBtn").addEventListener("click", resetForm);
 
 async function fetchCourses() {
   try {
-    const response = await fetch(`${API_BASE}/courses`);
+    const response = await fetch(`${API_BASE}/courses`, { credentials: "include" });
     const result = await response.json();
     if (!response.ok || result.success === false) {
       const message = result.message || "Failed to load courses";

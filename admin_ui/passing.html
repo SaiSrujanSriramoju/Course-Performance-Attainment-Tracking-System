@@ -7,11 +7,19 @@
   <link rel="stylesheet" href="dashboard.css">
   <link rel="stylesheet" href="sidebar.css">
 
-  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <!-- Prevent unauthorized access (Admin-only) -->
   <script>
-    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+    (async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.authenticated || result.role !== "admin") {
+          window.location.href = "../login/index.html";
+        }
+      } catch (err) {
         window.location.href = "../login/index.html";
-    }
+      }
+    })();
   </script>
 </head>
 <body>

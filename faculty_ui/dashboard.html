@@ -10,9 +10,17 @@
 
   <!-- Prevent unauthorized access -->
   <script>
-    if (localStorage.getItem("facultyLoggedIn") !== "true") {
+    (async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.authenticated || result.role !== "faculty") {
+          window.location.href = "../login/index.html";
+        }
+      } catch (err) {
         window.location.href = "../login/index.html";
-    }
+      }
+    })();
   </script>
 </head>
 
@@ -21,14 +29,14 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo-section">
-      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <img src="uoh_logo.png" alt="UoH Logo">
       <h2>Faculty Panel</h2>
     </div>
 
     <nav>
-      <a href="../faculty_ui/dashboard.html" class = "active">🏠 Dashboard</a>
-      <a href="../courses_ui/courses.html">📘 Courses</a>
-      <a href="../Reports_ui/reports.html">📊 Reports</a>
+      <a href="/faculty/dashboard" class = "active">🏠 Dashboard</a>
+      <a href="/courses/courses.html">📘 Courses</a>
+      <a href="/reports/reports.html">📊 Reports</a>
       <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
     </nav>
   </aside>
@@ -79,61 +87,88 @@
 
 <script>
 /* ---------------------- LOGOUT ---------------------- */
-function logout() {
-    localStorage.removeItem("facultyLoggedIn");
+const API_BASE = "http://localhost:5000/api";
+
+async function logout() {
+  try {
+    await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+  } finally {
     window.location.href = "../login/index.html";
+  }
 }
 
 /* ---------------------- LOAD DASHBOARD DATA ---------------------- */
-function loadDashboard() {
+async function loadDashboard() {
+  const tbody = document.getElementById("summaryBody");
+  tbody.innerHTML = "";
 
-    const courses = JSON.parse(localStorage.getItem("courses")) || [];
-    document.getElementById("coursesCount").innerText = courses.length;
+  let assignedCourses = [];
+  try {
+    const response = await fetch(`${API_BASE}/faculty/courses`, { credentials: "include" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      throw new Error(result.message || "Failed to load courses");
+    }
+    assignedCourses = result.courses || [];
+  } catch (err) {
+    tbody.innerHTML = `
+      <tr><td colspan="5" style="text-align:center;">Failed to load assigned courses.</td></tr>
+    `;
+    return;
+  }
 
-    const tbody = document.getElementById("summaryBody");
-    tbody.innerHTML = "";
+  document.getElementById("coursesCount").innerText = assignedCourses.length;
 
-    if (courses.length === 0) {
-        tbody.innerHTML = `
-            <tr><td colspan="5" style="text-align:center;">No courses added yet.</td></tr>
-        `;
-        return;
+  if (assignedCourses.length === 0) {
+    tbody.innerHTML = `
+      <tr><td colspan="5" style="text-align:center;">No courses assigned yet.</td></tr>
+    `;
+    return;
+  }
+
+  const localCourses = JSON.parse(localStorage.getItem("courses")) || [];
+  const findLocalIndex = (name) => localCourses.findIndex(c =>
+    c.name && String(c.name).toLowerCase() === String(name || "").toLowerCase()
+  );
+
+  let anyData = false;
+
+  assignedCourses.forEach((course) => {
+    const localIndex = findLocalIndex(course.course_name);
+    const reportKey = localIndex >= 0 ? "report_" + localIndex : null;
+    const report = reportKey ? JSON.parse(localStorage.getItem(reportKey)) : null;
+
+    if (report) { anyData = true; }
+
+    const avg = report && report.summary && report.summary.avgs && Number.isFinite(report.summary.avgs["Tot"]) ? report.summary.avgs["Tot"].toFixed(2) : "—";
+    const threshold = report && report.percentages && report.percentages["Tot"] !== undefined ? report.percentages["Tot"] + '%' : "—";
+
+    let att = "—";
+    if (report && report.attainment && report.attainment.levelsByCol) {
+      const lvl = report.attainment.levelsByCol["Tot"];
+      if (lvl !== undefined && lvl !== null) att = 'Level ' + lvl;
     }
 
-    let anyData = false;
+    const displayName = course.course_name || (localIndex >= 0 ? localCourses[localIndex].name : "Course");
+    const displayBatch = course.batch_name || (localIndex >= 0 ? localCourses[localIndex].batch : "—");
 
-    courses.forEach((course, index) => {
-        const reportKey = "report_" + index;
-        const report = JSON.parse(localStorage.getItem(reportKey));
+    const row = `
+      <tr>
+        <td>${displayName}</td>
+        <td>${displayBatch}</td>
+        <td>${avg}</td>
+        <td>${threshold}</td>
+        <td>${att}</td>
+      </tr>
+    `;
+    tbody.innerHTML += row;
+  });
 
-        if (report) { anyData = true; }
-
-        const avg = report && report.summary && report.summary.avgs && Number.isFinite(report.summary.avgs["Tot"]) ? report.summary.avgs["Tot"].toFixed(2) : "—";
-        const threshold = report && report.percentages && report.percentages["Tot"] !== undefined ? report.percentages["Tot"] + '%' : "—";
-
-        let att = "—";
-        if (report && report.attainment && report.attainment.levelsByCol) {
-          const lvl = report.attainment.levelsByCol["Tot"];
-          if (lvl !== undefined && lvl !== null) att = 'Level ' + lvl;
-        }
-
-        const row = `
-            <tr>
-                <td>${course.name}</td>
-                <td>${course.batch}</td>
-                <td>${avg}</td>
-                <td>${threshold}</td>
-                <td>${att}</td>
-            </tr>
-        `;
-        tbody.innerHTML += row;
-    });
-
-    if (!anyData) {
-        tbody.innerHTML = `
-            <tr><td colspan="5" style="text-align:center;">No reports generated yet.</td></tr>
-        `;
-    }
+  if (!anyData) {
+    tbody.innerHTML = `
+      <tr><td colspan="5" style="text-align:center;">No reports generated yet.</td></tr>
+    `;
+  }
 }
 
 loadDashboard();

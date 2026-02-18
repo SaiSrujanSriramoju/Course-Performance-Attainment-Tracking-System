@@ -3,8 +3,8 @@ const API_BASE = "http://localhost:5000/api";
 
 async function loadAdminData() {
   const [coursesResponse, assignmentsResponse] = await Promise.all([
-    fetch(`${API_BASE}/courses`),
-    fetch(`${API_BASE}/assignments`)
+    fetch(`${API_BASE}/courses`, { credentials: "include" }),
+    fetch(`${API_BASE}/assignments`, { credentials: "include" })
   ]);
 
   const coursesResult = await coursesResponse.json();
@@ -75,10 +75,12 @@ async function renderAdminReports() {
   }
 }
 
-function logout() {
-  localStorage.removeItem("adminLoggedIn");
-  localStorage.removeItem("facultyLoggedIn");
-  window.location.href = "../login/index.html";
+async function logout() {
+  try {
+    await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+  } finally {
+    window.location.href = "../login/index.html";
+  }
 }
 
 renderAdminReports();

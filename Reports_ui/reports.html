@@ -421,6 +421,20 @@
       }
     }
   </style>
+
+  <script>
+    (async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.authenticated || result.role !== "faculty") {
+          window.location.href = "../login/index.html";
+        }
+      } catch (err) {
+        window.location.href = "../login/index.html";
+      }
+    })();
+  </script>
 </head>
 
 <body>
@@ -433,16 +447,16 @@
       <h2>Faculty Panel</h2>
     </div>
     <nav>
-      <a href="../faculty_ui/dashboard.html" class="nav-link">
+      <a href="/faculty/dashboard" class="nav-link">
         <span class="icon">🏠</span> <span>Dashboard</span>
       </a>
-      <a href="../courses_ui/courses.html" class="nav-link">
+      <a href="/courses/courses.html" class="nav-link">
         <span class="icon">📘</span> <span>Courses</span>
       </a>
       <a href="#" class="nav-link active">
         <span class="icon">📊</span> <span>Reports</span>
       </a>
-      <a href="../login/index.html" class="nav-link logout">
+      <a href="#" class="nav-link logout" onclick="logout()">
         <span class="icon">🚪</span> <span>Logout</span>
       </a>
     </nav>
@@ -490,6 +504,16 @@
 
   <!-- ========== SCRIPT ========== -->
   <script>
+    const API_BASE = "http://localhost:5000/api";
+
+    async function logout() {
+      try {
+        await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+      } finally {
+        window.location.href = "../login/index.html";
+      }
+    }
+
     // ========= CONFIG =========
     const ROLL_COL = "Roll No";
     const COLS = ["CO-1", "CO-2", "Tot"];

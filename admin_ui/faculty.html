@@ -7,11 +7,19 @@
   <link rel="stylesheet" href="dashboard.css">
   <link rel="stylesheet" href="sidebar.css">
 
-  <!-- Prevent unauthorized access (Admin logic differs from Faculty) -->
+  <!-- Prevent unauthorized access (Admin-only) -->
   <script>
-    if (localStorage.getItem("adminLoggedIn") !== "true" && localStorage.getItem("facultyLoggedIn") !== "true") {
+    (async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.authenticated || result.role !== "admin") {
+          window.location.href = "../login/index.html";
+        }
+      } catch (err) {
         window.location.href = "../login/index.html";
-    }
+      }
+    })();
   </script>
 </head>
 <body>
@@ -19,7 +27,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo-section">
-      <img src="../faculty_ui/uoh_logo.png" alt="UoH Logo">
+      <img src="/faculty/uoh_logo.png" alt="UoH Logo">
       <h2>Admin Panel</h2>
     </div>
 
@@ -96,10 +104,12 @@
 
 <script>
 /* ---------------------- LOGOUT ---------------------- */
-function logout() {
-    localStorage.removeItem("adminLoggedIn");
-    localStorage.removeItem("facultyLoggedIn");
+async function logout() {
+  try {
+    await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+  } finally {
     window.location.href = "../login/index.html";
+  }
 }
 
 /* ---------------------- FACULTY STATE ---------------------- */
@@ -171,6 +181,7 @@ facultyForm.addEventListener("submit", async (e) => {
       const response = await fetch(`${API_BASE}/faculty/${editingFacultyId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           name: facultyName,
           email: facultyEmail,
@@ -187,6 +198,7 @@ facultyForm.addEventListener("submit", async (e) => {
       const response = await fetch(`${API_BASE}/faculty`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           faculty_id: facultyId,
           name: facultyName,
@@ -230,7 +242,10 @@ async function deleteFaculty(index) {
 
   const faculty = adminFaculty[index];
   try {
-    const response = await fetch(`${API_BASE}/faculty/${faculty.faculty_id}`, { method: "DELETE" });
+    const response = await fetch(`${API_BASE}/faculty/${faculty.faculty_id}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.success === false) {
       const message = result.message || "Failed to delete faculty";
@@ -247,7 +262,7 @@ document.getElementById("resetFacultyBtn").addEventListener("click", resetForm);
 
 async function fetchFaculty() {
   try {
-    const response = await fetch(`${API_BASE}/faculty`);
+    const response = await fetch(`${API_BASE}/faculty`, { credentials: "include" });
     const result = await response.json();
     if (!response.ok || result.success === false) {
       const message = result.message || "Failed to load faculty";

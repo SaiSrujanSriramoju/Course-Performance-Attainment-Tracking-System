@@ -143,9 +143,17 @@
 
 <script>
     /* Redirect if not logged in */
-    if (localStorage.getItem("facultyLoggedIn") !== "true") {
-        window.location.href = "../login/index.html";
-    }
+    (async () => {
+        try {
+            const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.authenticated || result.role !== "faculty") {
+                window.location.href = "../login/index.html";
+            }
+        } catch (err) {
+            window.location.href = "../login/index.html";
+        }
+    })();
 </script>
 
 </head>
@@ -154,15 +162,15 @@
 <!-- SIDEBAR -->
 <aside class="sidebar">
     <div class="logo-section">
-        <img src="../faculty_ui/uoh_logo.png">
+        <img src="uoh_logo.png">
         <h2>Faculty Panel</h2>
     </div>
 
     <nav>
-        <a href="../faculty_ui/dashboard.html">🏠 Dashboard</a>
-        <a href="courses.html" class="active">📘 Courses</a>
-        <a href="../Reports_ui/reports.html">📊 Reports</a>
-        <a href="../login/index.html" class="logout">🚪 Logout</a>
+        <a href="/faculty/dashboard">🏠 Dashboard</a>
+        <a href="/courses/courses.html" class="active">📘 Courses</a>
+        <a href="/reports/reports.html">📊 Reports</a>
+        <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
     </nav>
 </aside>
 
@@ -218,15 +226,25 @@
 <!-- JAVASCRIPT (FULL LOGIC) -->
 <script>
 
-let courses = JSON.parse(localStorage.getItem("courses")) || [];
+const API_BASE = "http://localhost:5000/api";
+
+async function logout() {
+    try {
+        await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+    } finally {
+        window.location.href = "../login/index.html";
+    }
+}
+
+let courses = [];
 let editingIndex = -1;
 
 function saveCourses() {
     localStorage.setItem("courses", JSON.stringify(courses));
-    loadCourses();
+    renderCourses();
 }
 
-function loadCourses() {
+function renderCourses() {
     const list = document.getElementById("coursesList");
     list.innerHTML = "";
 
@@ -239,10 +257,14 @@ function loadCourses() {
         const card = document.createElement("div");
         card.className = "course-card";
 
+        const batchYears = c.startYear && c.endYear ? `${c.startYear}-${c.endYear}` : "";
+        const batchLabel = batchYears ? `${c.batch} ${batchYears}` : (c.batch || "—");
+        const passLabel = c.passPercent !== undefined && c.passPercent !== "" ? c.passPercent : "—";
+
         card.innerHTML = `
             <h3>${c.name}</h3>
-            <p><strong>Batch:</strong> ${c.batch} ${c.startYear}-${c.endYear}</p>
-            <p><strong>Passing %:</strong> ${c.passPercent}</p>
+            <p><strong>Batch:</strong> ${batchLabel}</p>
+            <p><strong>Passing %:</strong> ${passLabel}</p>
             ${c.attainmentLevels && c.attainmentLevels.length ? `<p><strong>Attainment Levels:</strong> ${c.attainmentLevels.length} levels</p>` : ''}
 
             <button class="btn btn-blue" onclick="editCourse(${index})">Edit</button>
@@ -256,8 +278,7 @@ function loadCourses() {
 }
 
 document.getElementById("addCourseBtn").onclick = () => {
-    editingIndex = -1;
-    openModal();
+    alert("Courses are managed by Admin. Assigned courses appear here automatically.");
 };
 
 function openModal() {
@@ -315,29 +336,11 @@ document.getElementById("saveCourse").onclick = () => {
 };
 
 function editCourse(i) {
-    editingIndex = i;
-
-    let c = courses[i];
-    courseName.value = c.name;
-    courseBatch.value = c.batch;
-    startYear.value = c.startYear;
-    endYear.value = c.endYear;
-    passingPercent.value = c.passPercent;
-
-    // prefill attainment level controls if present
-    openModal();
-    if (c.attainmentLevels && Array.isArray(c.attainmentLevels)) {
-        const cnt = c.attainmentLevels.length || 3;
-        document.getElementById('levelsCount').value = cnt;
-        buildCourseLevelRows(c.attainmentLevels);
-    }
+    alert("Courses are managed by Admin. You can view assigned courses here.");
 }
 
 function deleteCourse(i) {
-    if (confirm("Delete this course?")) {
-        courses.splice(i, 1);
-        saveCourses();
-    }
+    alert("Courses are managed by Admin. You can view assigned courses here.");
 }
 
 // Build level definition rows inside the modal. If `prefill` is provided,
@@ -362,7 +365,38 @@ document.getElementById('levelsCount').addEventListener('change', () => buildCou
 
 // CO-PO upload removed: function removed from UI to simplify workflow
 
-loadCourses();
+async function fetchAssignedCourses() {
+    const response = await fetch(`${API_BASE}/faculty/courses`, { credentials: "include" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+        const message = result.message || "Failed to load assigned courses";
+        throw new Error(message);
+    }
+    return result.courses || [];
+}
+
+async function initCourses() {
+    try {
+        const assigned = await fetchAssignedCourses();
+        courses = assigned.map((c) => ({
+            name: c.course_name,
+            batch: c.batch_name || "",
+            startYear: "",
+            endYear: "",
+            passPercent: c.passing_marks,
+            attainmentLevels: [],
+            copoPdf: null,
+            copoPdfName: null
+        }));
+
+        saveCourses();
+    } catch (err) {
+        const list = document.getElementById("coursesList");
+        list.innerHTML = `<p>${err.message || "Failed to load courses"}</p>`;
+    }
+}
+
+initCourses();
 
 </script>
 

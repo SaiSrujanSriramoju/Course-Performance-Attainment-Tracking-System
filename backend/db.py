@@ -36,11 +36,17 @@ def init_db():
             "semester VARCHAR(50), "
             "batch_name VARCHAR(100), "
             "credits INT, "
-            "passing_marks INT"
+            "passing_marks INT, "
+            "syllabus_path VARCHAR(255)"
             ")"
         )
         try:
             cursor.execute("ALTER TABLE Courses ADD COLUMN batch_name VARCHAR(100)")
+        except mysql.connector.Error as exc:
+            if exc.errno != 1060:
+                raise
+        try:
+            cursor.execute("ALTER TABLE Courses ADD COLUMN syllabus_path VARCHAR(255)")
         except mysql.connector.Error as exc:
             if exc.errno != 1060:
                 raise
@@ -114,6 +120,14 @@ def init_db():
             "FOREIGN KEY (co_id) REFERENCES Course_Outcomes(co_id)"
             ")"
         )
+
+        # Ensure a default admin account exists for first-time login.
+        cursor.execute("SELECT COUNT(*) FROM Admin")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                "INSERT INTO Admin (username, password) VALUES (%s, %s)",
+                ("admin", "admin123"),
+            )
 
         conn.commit()
     finally:

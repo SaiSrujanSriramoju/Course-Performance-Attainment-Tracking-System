@@ -1150,7 +1150,7 @@ function generateFinalAttainmentMapping(idx) {
   if (!levels || !Array.isArray(levels) || levels.length === 0) {
     if (!confirm('No attainment levels defined for this course. Define them now in Courses?')) return;
     // redirect user to courses page
-    window.location.href = '../courses_ui/courses.html';
+    window.location.href = '/courses/courses.html';
     return;
   }
 

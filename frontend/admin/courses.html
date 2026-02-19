@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Course Management | Admin Panel</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="sidebar.css">
+
+  <!-- Prevent unauthorized access (Admin-only) -->
+  <script>
+    (async () => {
+      try {
+        const response = await fetch("http://localhost:5000/api/session", { credentials: "include" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.authenticated || result.role !== "admin") {
+          window.location.href = "../login/index.html";
+        }
+      } catch (err) {
+        window.location.href = "../login/index.html";
+      }
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo-section">
+      <img src="/faculty/uoh_logo.png" alt="UoH Logo">
+      <h2>Admin Panel</h2>
+    </div>
+
+    <nav>
+      <a href="dashboard.html">🏠 Dashboard</a>
+      <a href="courses.html" class="active">📘 Courses</a>
+      <a href="faculty.html">👨‍🏫 Faculty</a>
+      <a href="assignments.html">🧩 Assignments</a>
+      <a href="reports.html">📊 Reports</a>
+      <a href="#" class="logout" onclick="logout()">🚪 Logout</a>
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="content">
+
+    <header>
+      <h1>Course Management</h1>
+      <p class="dept">Add and manage course details</p>
+    </header>
+
+    <section class="form-card">
+      <form id="courseForm">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="courseCode">Course Code</label>
+            <input type="text" id="courseCode" required>
+          </div>
+          <div class="form-group">
+            <label for="courseName">Course Name</label>
+            <input type="text" id="courseName" required>
+          </div>
+          <div class="form-group">
+            <label for="semester">Semester</label>
+            <input type="text" id="semester" required>
+          </div>
+          <div class="form-group">
+            <label for="batchName">Batch Name</label>
+            <input type="text" id="batchName" required>
+          </div>
+          <div class="form-group">
+            <label for="credits">Credits</label>
+            <input type="number" id="credits" min="1" required>
+          </div>
+          <div class="form-group">
+            <label for="passingMarks">Passing Marks</label>
+            <input type="number" id="passingMarks" min="0" required>
+          </div>
+          <div class="form-group">
+            <label for="numberOfCos">Number of COs</label>
+            <input type="number" id="numberOfCos" min="1" required>
+          </div>
+          <div class="form-group">
+            <label for="syllabusFile">Syllabus</label>
+            <input type="file" id="syllabusFile" name="syllabus" accept=".pdf,.doc,.docx" required>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-green" id="saveCourseBtn">Save Course</button>
+          <button type="button" class="btn btn-outline" id="resetCourseBtn">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="data-section">
+      <h2>Courses List</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Course Code</th>
+            <th>Course Name</th>
+            <th>Semester</th>
+            <th>Batch</th>
+            <th>Credits</th>
+            <th>Passing Marks</th>
+            <th>Syllabus</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="coursesTableBody"></tbody>
+      </table>
+    </section>
+
+    <footer>
+      © 2025 University of Hyderabad | Admin Portal
+    </footer>
+
+  </main>
+
+<script>
+/* ---------------------- LOGOUT ---------------------- */
+async function logout() {
+  try {
+    await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+  } finally {
+    window.location.href = "../login/index.html";
+  }
+}
+
+/* ---------------------- COURSE STATE ---------------------- */
+const API_BASE = "http://localhost:5000/api";
+const FILE_BASE = API_BASE.replace("/api", "");
+let adminCourses = [];
+let editingCourseId = null;
+
+const courseForm = document.getElementById("courseForm");
+const coursesTableBody = document.getElementById("coursesTableBody");
+
+function resetForm() {
+    courseForm.reset();
+    editingCourseId = null;
+    document.getElementById("saveCourseBtn").innerText = "Save Course";
+    document.getElementById("syllabusFile").required = true;
+}
+
+function renderCourses() {
+    coursesTableBody.innerHTML = "";
+
+    if (!adminCourses.length) {
+      coursesTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No courses added yet.</td></tr>`;
+        return;
+    }
+
+    adminCourses.forEach((c, idx) => {
+        const syllabusUrl = c.syllabus_path ? `${FILE_BASE}/${c.syllabus_path}` : "";
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${c.course_code}</td>
+          <td>${c.course_name}</td>
+          <td>${c.semester}</td>
+          <td>${c.batch_name || "—"}</td>
+          <td>${c.credits}</td>
+          <td>${c.passing_marks}</td>
+          <td>
+            ${syllabusUrl ? `
+              <a class="btn btn-blue" href="${syllabusUrl}" target="_blank" rel="noreferrer">View</a>
+              <a class="btn btn-outline" href="${syllabusUrl}" download>Download</a>
+            ` : "—"}
+          </td>
+          <td>
+            <div class="table-actions">
+              <button class="btn btn-blue" onclick="editCourse(${idx})">Edit</button>
+              <button class="btn btn-red" onclick="deleteCourse(${idx})">Delete</button>
+            </div>
+          </td>
+        `;
+        coursesTableBody.appendChild(row);
+    });
+}
+
+courseForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+  const courseCode = document.getElementById("courseCode").value.trim();
+  const courseName = document.getElementById("courseName").value.trim();
+  const semester = document.getElementById("semester").value.trim();
+  const batchName = document.getElementById("batchName").value.trim();
+  const creditsValue = document.getElementById("credits").value.trim();
+  const passingMarksValue = document.getElementById("passingMarks").value.trim();
+  const numberOfCosValue = document.getElementById("numberOfCos").value.trim();
+
+  const credits = parseInt(creditsValue, 10);
+  const passingMarks = parseInt(passingMarksValue, 10);
+  const numberOfCos = parseInt(numberOfCosValue, 10);
+
+  if (!courseCode || !courseName || !semester || !batchName || Number.isNaN(credits) || Number.isNaN(passingMarks) || Number.isNaN(numberOfCos)) {
+    alert("Please fill all fields");
+    return;
+  }
+
+  try {
+    const url = editingCourseId ? `${API_BASE}/courses/${editingCourseId}` : `${API_BASE}/courses`;
+    const method = editingCourseId ? "PUT" : "POST";
+    let response;
+
+    if (editingCourseId) {
+      const payload = {
+        course_code: courseCode,
+        course_name: courseName,
+        semester,
+        batch_name: batchName,
+        credits,
+        passing_marks: passingMarks,
+        number_of_cos: numberOfCos
+      };
+      response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload)
+      });
+    } else {
+      const syllabusFile = document.getElementById("syllabusFile").files[0];
+      if (!syllabusFile) {
+        alert("Please upload a syllabus file");
+        return;
+      }
+      const formData = new FormData();
+      formData.append("course_code", courseCode);
+      formData.append("course_name", courseName);
+      formData.append("semester", semester);
+      formData.append("batch_name", batchName);
+      formData.append("credits", credits);
+      formData.append("passing_marks", passingMarks);
+      formData.append("number_of_cos", numberOfCos);
+      formData.append("syllabus_file", syllabusFile);
+
+      response = await fetch(url, {
+        method,
+        credentials: "include",
+        body: formData
+      });
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to save course";
+      alert(message);
+      return;
+    }
+
+    await fetchCourses();
+    resetForm();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
+});
+
+function editCourse(index) {
+    const c = adminCourses[index];
+  document.getElementById("courseCode").value = c.course_code;
+  document.getElementById("courseName").value = c.course_name;
+    document.getElementById("semester").value = c.semester;
+  document.getElementById("batchName").value = c.batch_name || "";
+    document.getElementById("credits").value = c.credits;
+  document.getElementById("passingMarks").value = c.passing_marks;
+  document.getElementById("numberOfCos").value = c.number_of_cos || "";
+
+    editingCourseId = c.course_id;
+    document.getElementById("syllabusFile").required = false;
+    document.getElementById("saveCourseBtn").innerText = "Update Course";
+}
+
+async function deleteCourse(index) {
+    if (!confirm("Delete this course?")) return;
+
+  const course = adminCourses[index];
+  try {
+    const response = await fetch(`${API_BASE}/courses/${course.course_id}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to delete course";
+      alert(message);
+      return;
+    }
+    await fetchCourses();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
+}
+
+document.getElementById("resetCourseBtn").addEventListener("click", resetForm);
+
+async function fetchCourses() {
+  try {
+    const response = await fetch(`${API_BASE}/courses`, { credentials: "include" });
+    const result = await response.json();
+    if (!response.ok || result.success === false) {
+      const message = result.message || "Failed to load courses";
+      alert(message);
+      return;
+    }
+    adminCourses = result.courses || [];
+    renderCourses();
+  } catch (err) {
+    alert("Failed to connect to the server");
+  }
+}
+
+fetchCourses();
+</script>
+
+</body>
+</html>

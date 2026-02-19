@@ -24,11 +24,12 @@ ALLOWED_SYLLABUS_EXTENSIONS = {".pdf", ".doc", ".docx"}
 MAX_SYLLABUS_SIZE_BYTES = 5 * 1024 * 1024
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-ADMIN_UI_DIR = os.path.join(BASE_DIR, "admin_ui")
-FACULTY_UI_DIR = os.path.join(BASE_DIR, "faculty_ui")
-LOGIN_UI_DIR = os.path.join(BASE_DIR, "login")
-COURSES_UI_DIR = os.path.join(BASE_DIR, "courses_ui")
-REPORTS_UI_DIR = os.path.join(BASE_DIR, "Reports_ui")
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+ADMIN_UI_DIR = os.path.join(FRONTEND_DIR, "admin")
+FACULTY_UI_DIR = os.path.join(FRONTEND_DIR, "faculty")
+LOGIN_UI_DIR = os.path.join(FRONTEND_DIR, "login")
+COURSES_UI_DIR = os.path.join(FRONTEND_DIR, "courses")
+REPORTS_UI_DIR = os.path.join(FRONTEND_DIR, "reports")
 
 app.config["MAX_CONTENT_LENGTH"] = MAX_SYLLABUS_SIZE_BYTES
 

@@ -587,7 +587,9 @@
     const excelInput = document.getElementById("excelInput");
 
     function renderCourses() {
-      courses = loadCourses();
+      if (!courses.length) {
+        courses = loadCourses();
+      }
       coursesArea.innerHTML = "";
 
       if (!courses.length) {
@@ -653,6 +655,34 @@
     });
 
     // QUESTION PAPER upload removed (handled outside this UI).
+
+    async function fetchAssignedCourses() {
+      const response = await fetch(`${API_BASE}/faculty/courses`, { credentials: "include" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        throw new Error(result.message || "Failed to load courses");
+      }
+
+      const mapped = (result.courses || []).map((c) => ({
+        courseId: c.course_id,
+        courseCode: c.course_code,
+        name: c.course_name,
+        batch: c.batch_name || "",
+        passPercent: c.passing_marks,
+      }));
+
+      localStorage.setItem("courses", JSON.stringify(mapped));
+      return mapped;
+    }
+
+    async function initReports() {
+      try {
+        courses = await fetchAssignedCourses();
+      } catch (err) {
+        courses = loadCourses();
+      }
+      renderCourses();
+    }
 
     // ========= MARKS UPLOAD =========
     let marksTargetIndex = null;
@@ -1066,12 +1096,11 @@
         : COLS;
 
       const hasMarks = thresholdMarks && Object.keys(thresholdMarks).length;
+      const coKeys = cols.filter(k => k.startsWith("CO-"));
       for (const c of cols) {
         let thrMark = hasMarks ? Number(thresholdMarks[c]) : NaN;
-        if (!Number.isFinite(thrMark) && c === "Tot") {
-          const coKeys = cols.filter(k => k.startsWith("CO-"));
-          const sumCo = coKeys.reduce((sum, k) => sum + (Number(thresholdMarks?.[k]) || 0), 0);
-          if (sumCo) thrMark = sumCo;
+        if (!Number.isFinite(thrMark) && c === "Tot" && Number.isFinite(thresholdMarks?.Tot)) {
+          thrMark = Number(thresholdMarks.Tot);
         }
         if (!Number.isFinite(thrMark) && Number.isFinite(thresholdPercentFallback)) {
           const rawMax = summary.maxMarks && summary.maxMarks[c];
@@ -1090,10 +1119,22 @@
 
         thresholdByCol[c] = thrMark;
 
-        const marks = (Array.isArray(summary.studRows) ? summary.studRows : [])
-          .filter(r => attempted(r[c]))
-          .map(r => toNumberSafe(r[c]))
-          .filter(v => !Number.isNaN(v));
+        let marks = [];
+        if (c === "Tot" && coKeys.length) {
+          marks = (Array.isArray(summary.studRows) ? summary.studRows : [])
+            .filter(r => attempted(r["Tot"]) || coKeys.some(k => attempted(r[k])))
+            .map(r => {
+              const totVal = toNumberSafe(r["Tot"]);
+              if (Number.isFinite(totVal)) return totVal;
+              return coKeys.reduce((sum, k) => sum + (toNumberSafe(r[k]) || 0), 0);
+            })
+            .filter(v => !Number.isNaN(v));
+        } else {
+          marks = (Array.isArray(summary.studRows) ? summary.studRows : [])
+            .filter(r => attempted(r[c]))
+            .map(r => toNumberSafe(r[c]))
+            .filter(v => !Number.isNaN(v));
+        }
 
         // Count students whose numeric mark is >= threshold mark
         const countAbove = marks.filter(m => m >= thrMark).length;
@@ -1171,6 +1212,10 @@
         const perc = payload.percentages || {};
         const cols = payload.cols || [];
 
+        const defaultRanges = Object.keys(rangesByCo).length
+          ? rangesByCo[Number(Object.keys(rangesByCo)[0])]
+          : [];
+
         cols.forEach((col) => {
           if (col.startsWith("CO-")) {
             const coNumber = Number(col.replace("CO-", ""));
@@ -1183,8 +1228,9 @@
 
         const coLevels = Object.keys(levelsByCol).map((key) => levelsByCol[key]).filter((v) => Number.isFinite(v));
         if (cols.includes("Tot")) {
-          const avgLevel = coLevels.length ? Number((coLevels.reduce((a, b) => a + b, 0) / coLevels.length).toFixed(2)) : 0;
-          levelsByCol["Tot"] = avgLevel;
+          const totPct = Number(perc["Tot"]);
+          const totLevel = getLevelFromLevels(defaultRanges, totPct);
+          levelsByCol["Tot"] = totLevel || 0;
         }
 
         payload.attainment.levelsByCol = levelsByCol;
@@ -1284,6 +1330,27 @@
 
       const currentCourseId = currentCourse && currentCourse.courseId ? currentCourse.courseId : null;
 
+      if (currentCourseId) {
+        const thresholdsKey = `thresholdsUpdated_${currentCourseId}`;
+        const thresholdsUpdatedAt = localStorage.getItem(thresholdsKey);
+        if (thresholdsUpdatedAt && payload.thresholdsUpdatedAt !== thresholdsUpdatedAt) {
+          payload.thresholdsApplied = false;
+          payload.thresholdsUpdatedAt = thresholdsUpdatedAt;
+          if (payload.attainment) {
+            payload.attainment.backendApplied = false;
+            delete payload.attainment.levelsByCol;
+          }
+        }
+
+        const rangesKey = `rangesUpdated_${currentCourseId}`;
+        const rangesUpdatedAt = localStorage.getItem(rangesKey);
+        if (payload.attainment && rangesUpdatedAt && payload.attainment.rangesUpdatedAt !== rangesUpdatedAt) {
+          payload.attainment.backendApplied = false;
+          payload.attainment.rangesUpdatedAt = rangesUpdatedAt;
+          delete payload.attainment.levelsByCol;
+        }
+      }
+
       // Recompute threshold-related values using the latest passing percent
       const recomputed = computeThresholds(s, payload.thresholdMarks || {}, s.appeared || 0, currentPassPercent);
 
@@ -1313,6 +1380,11 @@
           const p = Number(payload.percentages[c]);
           const lvl = getLevelFromLevels(payload.attainment.levels, p);
           levelsByCol[c] = lvl || 0;
+        }
+        if (Object.prototype.hasOwnProperty.call(payload.percentages || {}, "Tot")) {
+          const totPct = Number(payload.percentages["Tot"]);
+          const totLvl = getLevelFromLevels(payload.attainment.levels, totPct);
+          levelsByCol["Tot"] = totLvl || 0;
         }
         payload.attainment.levelsByCol = levelsByCol;
         // persist this change so downloads include it
@@ -1405,7 +1477,7 @@
       `;
 
       // ATTAINMENT LEVELS (if already computed)
-      if (att && att.levels && att.levelsByCol) {
+      if (att && att.levelsByCol) {
         html += `
           <div class="section-separator"></div>
           <h4>===== ATTAINMENT LEVELS =====</h4>
@@ -1428,7 +1500,7 @@
 
         const course = courses[activeCourseIndex] || {};
         const passPercent = Number(course.passingPercent ?? course.passPercent ?? course.passing ?? 0) || 0;
-        const thresholdData = computeThresholds(summary, payload.thresholdMarks || {}, summary.appeared || 0, passPercent);
+        const thresholdData = computeThresholds(summary, {}, summary.appeared || 0, passPercent);
 
         // Build payload to show in drawer
         const payload = {
@@ -1440,12 +1512,12 @@
           thresholdMarks: thresholdData.thresholdMarks,
           above: thresholdData.above,
           percentages: thresholdData.percentages,
-          attainment: null
+          attainment: null,
+          thresholdsApplied: false
         };
 
+        payload.cols = cols;
         lastPayload = payload;
-        // record which columns this payload uses
-        lastPayload.cols = cols;
         renderReport(payload);
         openDrawerForCourse(activeCourseIndex);
 
@@ -1555,7 +1627,7 @@
 
     // ========= FINAL ATTAINMENT MAPPING =========
     // Compute final mapping using minors (internal) and major (external)
-    function generateFinalAttainmentMapping(idx) {
+    async function generateFinalAttainmentMapping(idx) {
       const course = (loadCourses() || [])[idx];
       if (!course) {
         alert('Course not found');
@@ -1577,13 +1649,43 @@
       }
       const allCOs = Array.from(coSet).sort();
 
-      // Course-defined levels (must be provided when adding course)
-      const levels = course.attainmentLevels || null;
+      // Course-defined levels; if missing, try backend ranges.
+      let levels = course.attainmentLevels || null;
+      let rangesByCo = null;
       if (!levels || !Array.isArray(levels) || levels.length === 0) {
-        if (!confirm('No attainment levels defined for this course. Define them now in Courses?')) return;
-        // redirect user to courses page
-        window.location.href = '../courses_ui/courses.html';
-        return;
+        if (!course.courseId) {
+          alert('Attainment levels not available for this course. Please define them in Courses.');
+          return;
+        }
+        try {
+          const resp = await fetch(`${API_BASE}/get_attainment_ranges/${course.courseId}`, { credentials: "include" });
+          const data = await resp.json().catch(() => ({}));
+          if (resp.ok && data.success && Array.isArray(data.ranges) && data.ranges.length) {
+            const byCo = {};
+            data.ranges.forEach((row) => {
+              const co = Number(row.co_number);
+              if (!byCo[co]) byCo[co] = [];
+              byCo[co].push({
+                level: Number(row.level_number),
+                low: Number(row.lower_limit),
+                high: Number(row.upper_limit)
+              });
+            });
+            Object.keys(byCo).forEach((key) => {
+              byCo[key].sort((a, b) => a.level - b.level);
+            });
+            rangesByCo = byCo;
+            const firstCo = Math.min(...Object.keys(byCo).map(Number));
+            levels = (byCo[firstCo] || []).sort((a, b) => a.level - b.level);
+          }
+        } catch (err) {
+          // ignore; handled below
+        }
+
+        if (!levels || !Array.isArray(levels) || levels.length === 0) {
+          alert('No attainment levels defined for this course. Please define them in Courses.');
+          return;
+        }
       }
 
       // For each CO compute:
@@ -1592,6 +1694,20 @@
       // - Direct = ROUND(internal_level*0.4 + external_level*0.6, 2)
 
       const results = [];
+      function getLevelFromPayload(mr, coKey) {
+        if (mr && mr.attainment && mr.attainment.levelsByCol && mr.attainment.levelsByCol[coKey] !== undefined) {
+          const lvl = Number(mr.attainment.levelsByCol[coKey]);
+          return Number.isFinite(lvl) ? lvl : null;
+        }
+        if (mr && mr.percentages && Number.isFinite(Number(mr.percentages[coKey]))) {
+          const pct = Number(mr.percentages[coKey]);
+          const coNum = Number(String(coKey).replace("CO-", ""));
+          const coRanges = rangesByCo && rangesByCo[coNum] ? rangesByCo[coNum] : levels;
+          const lvl = getLevelFromLevels(coRanges, pct);
+          return lvl || null;
+        }
+        return null;
+      }
       for (const co of allCOs) {
         // internal: consider minor2 and minor3 only
         const minorKeys = ['minor1','minor2','minor3'];
@@ -1599,11 +1715,8 @@
         const internalLevels = [];
         for (const mk of minorKeys) {
           const mr = minors[mk];
-          if (mr && mr.percentages && Number.isFinite(Number(mr.percentages[co]))) {
-            const pct = Number(mr.percentages[co]);
-            const lvl = getLevelFromLevels(levels, pct);
-            if (lvl) internalLevels.push(lvl);
-          }
+          const lvl = getLevelFromPayload(mr, co);
+          if (Number.isFinite(lvl)) internalLevels.push(lvl);
         }
         if (internalLevels.length) {
           // average minor levels
@@ -1613,9 +1726,9 @@
         // external: major
         let externalLevel = null;
         const mrMajor = minors['major'];
-        if (mrMajor && mrMajor.percentages && Number.isFinite(Number(mrMajor.percentages[co]))) {
-          const pctM = Number(mrMajor.percentages[co]);
-          externalLevel = getLevelFromLevels(levels, pctM);
+        if (mrMajor) {
+          const lvl = getLevelFromPayload(mrMajor, co);
+          externalLevel = Number.isFinite(lvl) ? lvl : null;
         }
 
         const direct = (Number.isFinite(internalLevel) && Number.isFinite(externalLevel))
@@ -1757,7 +1870,7 @@
     }
 
     // ========= INIT =========
-    renderCourses();
+    initReports();
 
     // Listen for cross-tab/localStorage updates so changes in Courses reflect here
     window.addEventListener('storage', (e) => {

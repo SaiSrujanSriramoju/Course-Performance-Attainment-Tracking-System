@@ -728,7 +728,9 @@ async function saveAttainmentRanges(index) {
         if (!response.ok || result.success === false) {
             throw new Error(result.message || "Failed to save ranges");
         }
-        localStorage.setItem(`rangesUpdated_${course.courseId}`, String(Date.now()));
+        const updatedAt = String(Date.now());
+        localStorage.setItem(`rangesUpdated_${course.courseId}`, updatedAt);
+        localStorage.setItem(`thresholdsUpdated_${course.courseId}`, updatedAt);
         errorEl.style.display = "none";
         alert("Attainment ranges saved.");
     } catch (err) {

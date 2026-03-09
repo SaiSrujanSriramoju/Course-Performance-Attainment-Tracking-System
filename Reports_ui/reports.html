@@ -1650,9 +1650,19 @@
       }
       html += `<h4>Final Attainment Level Mapping</h4>`;
       html += `<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px">CO</th><th style="padding:6px">Internal</th><th style="padding:6px">External</th><th style="padding:6px">Direct</th></tr></thead><tbody>`;
+
+      const internalVals = rows.map(r => Number(r.internalLevel)).filter(v => Number.isFinite(v));
+      const externalVals = rows.map(r => Number(r.externalLevel)).filter(v => Number.isFinite(v));
+      const avgInternal = internalVals.length ? Number((internalVals.reduce((a, b) => a + b, 0) / internalVals.length).toFixed(2)) : null;
+      const avgExternal = externalVals.length ? Number((externalVals.reduce((a, b) => a + b, 0) / externalVals.length).toFixed(2)) : null;
+      const avgDirect = (Number.isFinite(avgInternal) && Number.isFinite(avgExternal))
+        ? Number(((avgInternal * 0.4) + (avgExternal * 0.6)).toFixed(2))
+        : null;
+
       for (const r of rows) {
         html += `<tr><td style="padding:6px">${escapeHtml(r.co)}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.internalLevel)?r.internalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.externalLevel)?r.externalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.direct)?r.direct:''}</td></tr>`;
       }
+      html += `<tr><td style="padding:6px;font-weight:600;">Total</td><td style="text-align:center;padding:6px;font-weight:600;">${Number.isFinite(avgInternal) ? avgInternal : ''}</td><td style="text-align:center;padding:6px;font-weight:600;">${Number.isFinite(avgExternal) ? avgExternal : ''}</td><td style="text-align:center;padding:6px;font-weight:600;">${Number.isFinite(avgDirect) ? avgDirect : ''}</td></tr>`;
       html += `</tbody></table>`;
       html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Direct = Internal*0.4 + External*0.6 (rounded to 2 decimals)</div>`;
       return html;
@@ -1663,6 +1673,14 @@
       const rows = [];
       rows.push(['CO','Internal','External','Direct']);
       for (const r of mapping.rows) rows.push([r.co, r.internalLevel == null ? '' : r.internalLevel, r.externalLevel == null ? '' : r.externalLevel, r.direct == null ? '' : r.direct]);
+      const internalVals = mapping.rows.map(r => Number(r.internalLevel)).filter(v => Number.isFinite(v));
+      const externalVals = mapping.rows.map(r => Number(r.externalLevel)).filter(v => Number.isFinite(v));
+      const avgInternal = internalVals.length ? Number((internalVals.reduce((a, b) => a + b, 0) / internalVals.length).toFixed(2)) : '';
+      const avgExternal = externalVals.length ? Number((externalVals.reduce((a, b) => a + b, 0) / externalVals.length).toFixed(2)) : '';
+      const avgDirect = (Number.isFinite(avgInternal) && Number.isFinite(avgExternal))
+        ? Number(((avgInternal * 0.4) + (avgExternal * 0.6)).toFixed(2))
+        : '';
+      rows.push(['Total', avgInternal, avgExternal, avgDirect]);
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, 'Final_Attainment_Level_Mapping');

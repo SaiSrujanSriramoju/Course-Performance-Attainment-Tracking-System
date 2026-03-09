@@ -1360,6 +1360,10 @@
       payload.above = recomputed.above;
       payload.percentages = recomputed.percentages;
 
+      if (payload.examType && typeof activeCourseIndex === "number" && !Number.isNaN(activeCourseIndex)) {
+        try { saveMinorReportForCourse(activeCourseIndex, payload.examType, payload); } catch (e) { /* ignore */ }
+      }
+
       // Pull threshold marks and attainment levels from backend if available
       if (currentCourseId && !payload.thresholdsApplied) {
         applyBackendThresholds(payload, currentCourseId);
@@ -1513,7 +1517,8 @@
           above: thresholdData.above,
           percentages: thresholdData.percentages,
           attainment: null,
-          thresholdsApplied: false
+          thresholdsApplied: false,
+          examType: String(label).toLowerCase()
         };
 
         payload.cols = cols;
@@ -1625,6 +1630,8 @@
 
     // Attainment modal removed: attainment levels must be configured in Courses module.
 
+    const FINAL_MAPPING_DEBUG_VERSION = "final-mapping-v2026-03-09-1";
+
     // ========= FINAL ATTAINMENT MAPPING =========
     // Compute final mapping using minors (internal) and major (external)
     async function generateFinalAttainmentMapping(idx) {
@@ -1634,66 +1641,37 @@
         return;
       }
 
-      // Load saved minor/major reports
       const minors = loadMinorReportsForCourse(idx) || {};
       if (!minors || (Object.keys(minors).length === 0)) {
-        alert('No Minor/Major reports found for this course. Please upload Minor2/Minor3/Major first.');
+        alert('No Minor/Major reports found for this course. Please upload Minor1/Minor2/Minor3/Major first.');
         return;
       }
 
-      // Build union of COs from minor and major reports
-      const coSet = new Set();
-      for (const k of Object.keys(minors)) {
-        const mr = minors[k];
-        if (mr && mr.percentages) Object.keys(mr.percentages).forEach(c => coSet.add(c));
-      }
-      const allCOs = Array.from(coSet).sort();
-
-      // Course-defined levels; if missing, try backend ranges.
-      let levels = course.attainmentLevels || null;
-      let rangesByCo = null;
-      if (!levels || !Array.isArray(levels) || levels.length === 0) {
-        if (!course.courseId) {
-          alert('Attainment levels not available for this course. Please define them in Courses.');
-          return;
-        }
+      let rangesByCo = {};
+      let fallbackLevels = course.attainmentLevels || [];
+      if (course.courseId) {
         try {
           const resp = await fetch(`${API_BASE}/get_attainment_ranges/${course.courseId}`, { credentials: "include" });
           const data = await resp.json().catch(() => ({}));
-          if (resp.ok && data.success && Array.isArray(data.ranges) && data.ranges.length) {
-            const byCo = {};
+          if (resp.ok && data.success && Array.isArray(data.ranges)) {
             data.ranges.forEach((row) => {
               const co = Number(row.co_number);
-              if (!byCo[co]) byCo[co] = [];
-              byCo[co].push({
+              if (!rangesByCo[co]) rangesByCo[co] = [];
+              rangesByCo[co].push({
                 level: Number(row.level_number),
                 low: Number(row.lower_limit),
                 high: Number(row.upper_limit)
               });
             });
-            Object.keys(byCo).forEach((key) => {
-              byCo[key].sort((a, b) => a.level - b.level);
+            Object.keys(rangesByCo).forEach((key) => {
+              rangesByCo[key].sort((a, b) => a.level - b.level);
             });
-            rangesByCo = byCo;
-            const firstCo = Math.min(...Object.keys(byCo).map(Number));
-            levels = (byCo[firstCo] || []).sort((a, b) => a.level - b.level);
           }
         } catch (err) {
-          // ignore; handled below
-        }
-
-        if (!levels || !Array.isArray(levels) || levels.length === 0) {
-          alert('No attainment levels defined for this course. Please define them in Courses.');
-          return;
+          // ignore
         }
       }
 
-      // For each CO compute:
-      // - Internal level: derived from Minor reports (minor2+minor3). We'll average available minors equally.
-      // - External level: derived from Major report percentages.
-      // - Direct = ROUND(internal_level*0.4 + external_level*0.6, 2)
-
-      const results = [];
       function getLevelFromPayload(mr, coKey) {
         if (mr && mr.attainment && mr.attainment.levelsByCol && mr.attainment.levelsByCol[coKey] !== undefined) {
           const lvl = Number(mr.attainment.levelsByCol[coKey]);
@@ -1702,51 +1680,55 @@
         if (mr && mr.percentages && Number.isFinite(Number(mr.percentages[coKey]))) {
           const pct = Number(mr.percentages[coKey]);
           const coNum = Number(String(coKey).replace("CO-", ""));
-          const coRanges = rangesByCo && rangesByCo[coNum] ? rangesByCo[coNum] : levels;
+          const coRanges = rangesByCo[coNum] && rangesByCo[coNum].length
+            ? rangesByCo[coNum]
+            : fallbackLevels;
           const lvl = getLevelFromLevels(coRanges, pct);
-          return lvl || null;
+          return Number.isFinite(lvl) ? lvl : null;
         }
         return null;
       }
-      for (const co of allCOs) {
-        // internal: consider minor2 and minor3 only
-        const minorKeys = ['minor1','minor2','minor3'];
-        let internalLevel = null;
-        const internalLevels = [];
-        for (const mk of minorKeys) {
-          const mr = minors[mk];
-          const lvl = getLevelFromPayload(mr, co);
-          if (Number.isFinite(lvl)) internalLevels.push(lvl);
-        }
-        if (internalLevels.length) {
-          // average minor levels
-          internalLevel = Number((internalLevels.reduce((a,b)=>a+b,0)/internalLevels.length).toFixed(2));
-        }
 
-        // external: major
-        let externalLevel = null;
-        const mrMajor = minors['major'];
-        if (mrMajor) {
-          const lvl = getLevelFromPayload(mrMajor, co);
-          externalLevel = Number.isFinite(lvl) ? lvl : null;
-        }
+      const mappingByCo = {
+        1: 'minor1',
+        2: 'minor1',
+        3: 'minor2',
+        4: 'minor2',
+        5: 'minor3',
+        6: 'minor3'
+      };
 
+      const results = [];
+      let debugLine = '';
+      for (const coNum of [1, 2, 3, 4, 5, 6]) {
+        const coKey = `CO-${coNum}`;
+        const internalExam = mappingByCo[coNum];
+        const internalLevel = internalExam ? getLevelFromPayload(minors[internalExam], coKey) : null;
+        const externalLevel = getLevelFromPayload(minors['major'], coKey);
         const direct = (Number.isFinite(internalLevel) && Number.isFinite(externalLevel))
           ? Number(((internalLevel * 0.4) + (externalLevel * 0.6)).toFixed(2))
           : NaN;
+        results.push({ co: coKey, internalLevel, externalLevel, direct });
 
-        results.push({ co, internalLevel, externalLevel, direct });
+        if (coNum === 4 || coNum === 6) {
+          const internalPayload = internalExam ? minors[internalExam] : null;
+          const pct = Number(internalPayload && internalPayload.percentages ? internalPayload.percentages[coKey] : NaN);
+          const ranges = rangesByCo[coNum] && rangesByCo[coNum].length ? rangesByCo[coNum] : fallbackLevels;
+          const rangeText = Array.isArray(ranges)
+            ? ranges.map(r => `[${r.low}-${r.high}=>${r.level}]`).join(' ')
+            : '';
+          debugLine += `${coKey} pct=${Number.isFinite(pct) ? pct : 'N/A'} level=${Number.isFinite(internalLevel) ? internalLevel : 'N/A'} ranges=${rangeText} | `;
+        }
       }
 
-      // Render final mapping in drawer (separate from minor/major display)
       const courseName = course.name || 'Course';
-      const html = buildFinalMappingHtml(courseName, results);
+      console.log("Final mapping build:", FINAL_MAPPING_DEBUG_VERSION, results);
+      const html = buildFinalMappingHtml(courseName, results, debugLine.trim());
       resultsPrintable.innerHTML = html;
       drawerCourseTitle.textContent = courseName + ' — Final Attainment Level Mapping';
       drawerBatchInfo.textContent = course.batch ? `Batch: ${course.batch}` : '';
       resultsDrawer.classList.add('open');
 
-      // Also store final mapping on a payload for download/export
       lastPayload = lastPayload || {};
       lastPayload.finalMapping = { courseName, batch: course.batch || '', rows: results };
       try {
@@ -1756,15 +1738,18 @@
       } catch (e) { console.warn('Could not build final mapping workbook', e); }
     }
 
-    function buildFinalMappingHtml(courseName, rows) {
+    function buildFinalMappingHtml(courseName, rows, debugLine) {
       let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div><div class="section-separator"></div></div>`;
+      html += `<div style="margin:-4px 0 10px;font-size:0.78rem;color:#7a1f2b;">${FINAL_MAPPING_DEBUG_VERSION}</div>`;
+      if (debugLine) {
+        html += `<div style="margin:-2px 0 10px;font-size:0.78rem;color:#7a1f2b;">${escapeHtml(debugLine)}</div>`;
+      }
       html += `<h4>Final Attainment Level Mapping</h4>`;
       html += `<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px">CO</th><th style="padding:6px">Internal</th><th style="padding:6px">External</th><th style="padding:6px">Direct</th></tr></thead><tbody>`;
       for (const r of rows) {
         html += `<tr><td style="padding:6px">${escapeHtml(r.co)}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.internalLevel)?r.internalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.externalLevel)?r.externalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.direct)?r.direct:''}</td></tr>`;
       }
       html += `</tbody></table>`;
-      // Add small note
       html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Direct = Internal*0.4 + External*0.6 (rounded to 2 decimals)</div>`;
       return html;
     }

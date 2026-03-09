@@ -1,5 +1,6 @@
 from datetime import datetime
 from functools import wraps
+import math
 import os
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, session
@@ -115,6 +116,40 @@ def get_course_co_numbers(course_id):
     finally:
         cursor.close()
         conn.close()
+
+
+def fetch_attainment_by_co(cursor, table_name, course_id, co_numbers):
+    allowed_tables = {
+        "minor1_attainment",
+        "minor2_attainment",
+        "minor3_attainment",
+        "major_attainment",
+    }
+    if table_name not in allowed_tables:
+        raise ValueError("Invalid attainment table")
+
+    if not co_numbers:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(co_numbers))
+    query = (
+        f"SELECT co_number, attainment "
+        f"FROM {table_name} "
+        f"WHERE course_id=%s AND co_number IN ({placeholders})"
+    )
+    cursor.execute(query, [course_id, *co_numbers])
+    rows = cursor.fetchall()
+    return {int(row["co_number"]): row.get("attainment") for row in rows}
+
+
+def get_exam_table(exam_type):
+    mapping = {
+        "minor1": "minor1_attainment",
+        "minor2": "minor2_attainment",
+        "minor3": "minor3_attainment",
+        "major": "major_attainment",
+    }
+    return mapping.get(str(exam_type).lower())
 
 
 def load_attainment_ranges(course_id, faculty_id):
@@ -1015,6 +1050,181 @@ def get_co_po_direct(course_id):
             "co_po_direct": co_po_direct,
             "po_attainment": po_attainment,
         })
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/co_po_matrix/<int:course_id>", methods=["GET"])
+@role_required("faculty")
+def get_co_po_matrix(course_id):
+    faculty_id = session.get("faculty_id")
+    if not faculty_assigned_to_course(course_id, faculty_id):
+        return json_response({"success": False, "message": "Forbidden"}, 403)
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT co_number, po_number, value AS weight "
+            "FROM co_po_matrix WHERE course_id=%s",
+            (course_id,),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return json_response({"success": False, "message": "Syllabus CO-PO matrix not uploaded"}, 404)
+
+        co_count = max(int(row["co_number"]) for row in rows)
+        po_count = max(int(row["po_number"]) for row in rows)
+
+        matrix = [[0 for _ in range(po_count)] for _ in range(co_count)]
+        for row in rows:
+            co_idx = int(row["co_number"]) - 1
+            po_idx = int(row["po_number"]) - 1
+            if 0 <= co_idx < co_count and 0 <= po_idx < po_count:
+                matrix[co_idx][po_idx] = int(row["weight"])
+
+        averages = []
+        for po_idx in range(po_count):
+            total = sum(matrix[co_idx][po_idx] for co_idx in range(co_count))
+            averages.append(round(total / co_count, 2) if co_count else 0)
+
+        return json_response({
+            "success": True,
+            "co_count": co_count,
+            "po_count": po_count,
+            "matrix": matrix,
+            "averages": averages,
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/final_mapping/<int:course_id>", methods=["GET"])
+@role_required("faculty")
+def get_final_mapping(course_id):
+    faculty_id = session.get("faculty_id")
+    if not faculty_assigned_to_course(course_id, faculty_id):
+        return json_response({"success": False, "message": "Forbidden"}, 403)
+
+    co_numbers = get_course_co_numbers(course_id)
+    if not co_numbers:
+        return json_response({"success": False, "message": "No COs found"}, 404)
+
+    minor1_cos = [co for co in co_numbers if co in (1, 2)]
+    minor2_cos = [co for co in co_numbers if co in (3, 4)]
+    minor3_cos = [co for co in co_numbers if co in (5, 6)]
+
+    unsupported_cos = [co for co in co_numbers if co not in (1, 2, 3, 4, 5, 6)]
+    if unsupported_cos:
+        return json_response({"success": False, "message": "Unsupported CO mapping"}, 400)
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        minor1_raw = fetch_attainment_by_co(cursor, "minor1_attainment", course_id, minor1_cos)
+        minor2_raw = fetch_attainment_by_co(cursor, "minor2_attainment", course_id, minor2_cos)
+        minor3_raw = fetch_attainment_by_co(cursor, "minor3_attainment", course_id, minor3_cos)
+        major_raw = fetch_attainment_by_co(cursor, "major_attainment", course_id, co_numbers)
+
+        missing = []
+
+        def normalize_values(raw_map, cos):
+            normalized = {}
+            for co in cos:
+                if co not in raw_map:
+                    missing.append(co)
+                    continue
+                try:
+                    value = float(raw_map.get(co))
+                except (TypeError, ValueError):
+                    missing.append(co)
+                    continue
+                if not math.isfinite(value):
+                    missing.append(co)
+                    continue
+                normalized[co] = value
+            return normalized
+
+        minor1_map = normalize_values(minor1_raw, minor1_cos)
+        minor2_map = normalize_values(minor2_raw, minor2_cos)
+        minor3_map = normalize_values(minor3_raw, minor3_cos)
+        major_map = normalize_values(major_raw, co_numbers)
+
+        if missing:
+            return json_response({"success": False, "message": "Upload all exams first"}, 400)
+
+        internal_by_co = {}
+        internal_by_co.update(minor1_map)
+        internal_by_co.update(minor2_map)
+        internal_by_co.update(minor3_map)
+
+        results = []
+        for co in co_numbers:
+            internal = internal_by_co.get(co)
+            external = major_map.get(co)
+            direct = round((internal * 0.4) + (external * 0.6), 2)
+            results.append({
+                "co": f"CO{co}",
+                "internal": internal,
+                "external": external,
+                "direct": direct,
+            })
+
+        return jsonify(results), 200
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/save_exam_attainment", methods=["POST"])
+@role_required("faculty")
+def save_exam_attainment():
+    data, error = get_request_json()
+    if error:
+        return error
+
+    course_id = data.get("course_id")
+    exam_type = data.get("exam_type")
+    entries = data.get("entries")
+    faculty_id = session.get("faculty_id")
+
+    if not course_id or not exam_type or not isinstance(entries, list):
+        return json_response({"success": False, "message": "course_id, exam_type, entries required"}, 400)
+    if not faculty_assigned_to_course(course_id, faculty_id):
+        return json_response({"success": False, "message": "Forbidden"}, 403)
+
+    table_name = get_exam_table(exam_type)
+    if not table_name:
+        return json_response({"success": False, "message": "Invalid exam_type"}, 400)
+
+    normalized = []
+    for entry in entries:
+        co_number = entry.get("co_number")
+        value = entry.get("attainment")
+        try:
+            co_number = int(co_number)
+            value = float(value)
+        except (TypeError, ValueError):
+            return json_response({"success": False, "message": "Invalid attainment value"}, 400)
+        if value < 0 or value > 3:
+            return json_response({"success": False, "message": "Attainment must be 0-3"}, 400)
+        normalized.append((course_id, co_number, value))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            f"DELETE FROM {table_name} WHERE course_id=%s",
+            (course_id,),
+        )
+        cursor.executemany(
+            f"INSERT INTO {table_name} (course_id, co_number, attainment) VALUES (%s, %s, %s)",
+            normalized,
+        )
+        conn.commit()
+        return json_response({"success": True})
     finally:
         cursor.close()
         conn.close()

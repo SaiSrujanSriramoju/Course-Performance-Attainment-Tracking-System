@@ -167,6 +167,46 @@ def init_db():
             ")"
         )
 
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS minor1_attainment ("
+            "course_id INT NOT NULL, "
+            "co_number INT NOT NULL, "
+            "attainment DECIMAL(5,2) NOT NULL, "
+            "UNIQUE KEY uniq_minor1 (course_id, co_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id)"
+            ")"
+        )
+
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS minor2_attainment ("
+            "course_id INT NOT NULL, "
+            "co_number INT NOT NULL, "
+            "attainment DECIMAL(5,2) NOT NULL, "
+            "UNIQUE KEY uniq_minor2 (course_id, co_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id)"
+            ")"
+        )
+
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS minor3_attainment ("
+            "course_id INT NOT NULL, "
+            "co_number INT NOT NULL, "
+            "attainment DECIMAL(5,2) NOT NULL, "
+            "UNIQUE KEY uniq_minor3 (course_id, co_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id)"
+            ")"
+        )
+
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS major_attainment ("
+            "course_id INT NOT NULL, "
+            "co_number INT NOT NULL, "
+            "attainment DECIMAL(5,2) NOT NULL, "
+            "UNIQUE KEY uniq_major (course_id, co_number), "
+            "FOREIGN KEY (course_id) REFERENCES Courses(course_id)"
+            ")"
+        )
+
         # Ensure a default admin account exists for first-time login.
         cursor.execute("SELECT COUNT(*) FROM Admin")
         if cursor.fetchone()[0] == 0:

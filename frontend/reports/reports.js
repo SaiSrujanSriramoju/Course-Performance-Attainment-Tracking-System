@@ -27,6 +27,10 @@ function escapeHtml(str) {
   ));
 }
 
+function escapeCssValue(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\"");
+}
+
 function looksLikeRoll(val) {
   if (val == null) return false;
   const s = String(val).trim().toUpperCase();
@@ -218,6 +222,8 @@ function renderCourses() {
         <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
         <button class="btn btn-green" data-idx="${idx}" data-role="final-map-btn">Final Mapping</button>
       </div>
+      <div class="course-instructions" style="margin-top:14px;">Final Attainment Level Mapping</div>
+      <div id="final-mapping-${idx}">Click Final Mapping to generate the table.</div>
       <div class="course-instructions" style="margin-top:14px;">CO-PO Matrix</div>
       <div id="co-po-matrix-${idx}">Loading CO-PO matrix...</div>
       <div class="course-instructions" style="margin-top:14px;">PO Attainment (Direct)</div>
@@ -1322,6 +1328,18 @@ async function generateFinalAttainmentMapping(idx) {
       };
     });
 
+    const meta = loadFinalMappingMeta(course.courseId);
+    const enriched = normalized.map((row) => {
+      const key = String(row.co || '');
+      const targetRaw = meta.targets[key];
+      const target = targetRaw === '' || targetRaw == null ? null : Number(targetRaw);
+      return {
+        ...row,
+        targetLevel: Number.isFinite(target) ? target : null,
+        remarks: meta.remarks[key] || ''
+      };
+    });
+
     const li = (localData && localData.internalByCo) ? localData.internalByCo : {};
     const le = (localData && localData.externalByCo) ? localData.externalByCo : {};
     const b4 = Array.isArray(result) ? result.find(r => Number(r.co_number || String(r.co || '').replace(/[^0-9]/g, '')) === 4) : null;
@@ -1330,14 +1348,23 @@ async function generateFinalAttainmentMapping(idx) {
                       `; CO-6 local internal=${li[6]} external=${le[6]} | backend internal=${b6?.internal} external=${b6?.external}`;
 
     console.log(debugInfo);
-    const html = buildFinalMappingHtml(courseName, normalized, debugInfo);
+    const html = buildFinalMappingHtml(courseName, enriched, debugInfo);
+    const targetContainer = document.getElementById(`final-mapping-${idx}`);
+    if (targetContainer) {
+      targetContainer.innerHTML = html;
+      wireFinalMappingInputs(course.courseId, enriched, targetContainer);
+    }
+
+    // Keep drawer view for consistency with other reports
     resultsPrintable.innerHTML = html;
     drawerCourseTitle.textContent = courseName + ' — Final Attainment Level Mapping';
     drawerBatchInfo.textContent = course.batch ? `Batch: ${course.batch}` : '';
     resultsDrawer.classList.add('open');
 
+    wireFinalMappingInputs(course.courseId, enriched, resultsPrintable);
+
     lastPayload = lastPayload || {};
-    lastPayload.finalMapping = { courseName, batch: course.batch || '', rows: normalized };
+    lastPayload.finalMapping = { courseName, batch: course.batch || '', rows: enriched };
     try {
       const wb = buildFinalMappingWorkbook(lastPayload.finalMapping);
       lastPayload.finalMapping.wb = wb.wb;
@@ -1348,30 +1375,142 @@ async function generateFinalAttainmentMapping(idx) {
   }
 }
 
+function loadFinalMappingMeta(courseId) {
+  const empty = { targets: {}, remarks: {} };
+  if (!courseId) return empty;
+  try {
+    const raw = localStorage.getItem(`final_mapping_meta_${courseId}`);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw);
+    return {
+      targets: parsed.targets || {},
+      remarks: parsed.remarks || {}
+    };
+  } catch (e) {
+    return empty;
+  }
+}
+
+function saveFinalMappingMeta(courseId, meta) {
+  if (!courseId) return;
+  try {
+    localStorage.setItem(`final_mapping_meta_${courseId}`, JSON.stringify(meta));
+  } catch (e) {
+    // ignore storage errors
+  }
+}
+
+function calcMetStatus(attained, target) {
+  if (!Number.isFinite(attained) || !Number.isFinite(target)) return '';
+  return attained > target ? 'Met' : 'Not Met';
+}
+
 function buildFinalMappingHtml(courseName, rows, debugInfo) {
   let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div><div class="section-separator"></div></div>`;
   if (debugInfo) {
     html += `<div style="margin:6px 0 10px;padding:6px 8px;border:1px dashed #b45;color:#7a1f2b;font-size:0.8rem;">${escapeHtml(debugInfo)}</div>`;
   }
   html += `<h4>Final Attainment Level Mapping</h4>`;
-  html += `<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:6px">CO</th><th style="padding:6px">Internal</th><th style="padding:6px">External</th><th style="padding:6px">Direct</th></tr></thead><tbody>`;
-  for (const r of rows) {
-    html += `<tr><td style="padding:6px">${escapeHtml(r.co)}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.internalLevel)?r.internalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.externalLevel)?r.externalLevel:''}</td><td style="text-align:center;padding:6px">${Number.isFinite(r.direct)?r.direct:''}</td></tr>`;
-  }
+  html += `<table style="width:100%;border-collapse:collapse"><thead><tr>` +
+    `<th style="text-align:left;padding:6px">Sl.No</th>` +
+    `<th style="text-align:left;padding:6px">CO</th>` +
+    `<th style="padding:6px">Target Level</th>` +
+    `<th style="padding:6px">Attained Level</th>` +
+    `<th style="padding:6px">Met/Not Met</th>` +
+    `<th style="padding:6px">Remarks</th>` +
+  `</tr></thead><tbody>`;
+  rows.forEach((r, idx) => {
+    const targetVal = Number.isFinite(r.targetLevel) ? r.targetLevel : '';
+    const attainedVal = Number.isFinite(r.direct) ? r.direct : '';
+    const status = calcMetStatus(r.direct, r.targetLevel);
+    const remarks = r.remarks || '';
+    const safeCo = escapeHtml(r.co || '');
+    html += `<tr>` +
+      `<td style="padding:6px">${idx + 1}</td>` +
+      `<td style="padding:6px">${safeCo}</td>` +
+      `<td style="text-align:center;padding:6px">` +
+        `<input type="number" step="0.01" min="0" class="final-map-target" data-co="${safeCo}" value="${targetVal}" style="width:80px;text-align:center;">` +
+      `</td>` +
+      `<td style="text-align:center;padding:6px" class="final-map-attained" data-co="${safeCo}">${attainedVal}</td>` +
+      `<td style="text-align:center;padding:6px" class="final-map-status" data-co="${safeCo}">${status}</td>` +
+      `<td style="padding:6px">` +
+        `<input type="text" class="final-map-remarks" data-co="${safeCo}" value="${escapeHtml(remarks)}" style="width:100%;">` +
+      `</td>` +
+    `</tr>`;
+  });
   html += `</tbody></table>`;
   // Add small note
-  html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Direct = Internal*0.4 + External*0.6 (rounded to 2 decimals)</div>`;
+  html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Attained Level is from the final mapping (Direct = Internal*0.4 + External*0.6, rounded to 2 decimals).</div>`;
   if (debugInfo) {
     html += `<div style="margin-top:8px;font-size:0.78rem;color:#555;">${escapeHtml(debugInfo)}</div>`;
   }
   return html;
 }
 
+function wireFinalMappingInputs(courseId, rows, hostEl) {
+  if (!hostEl) return;
+  const meta = loadFinalMappingMeta(courseId);
+  const targetInputs = hostEl.querySelectorAll('.final-map-target');
+  const remarkInputs = hostEl.querySelectorAll('.final-map-remarks');
+
+  function persist() {
+    saveFinalMappingMeta(courseId, meta);
+    if (lastPayload && lastPayload.finalMapping) {
+      lastPayload.finalMapping.rows = rows;
+      try {
+        const wb = buildFinalMappingWorkbook(lastPayload.finalMapping);
+        lastPayload.finalMapping.wb = wb.wb;
+        lastPayload.finalMapping.filename = wb.filename;
+      } catch (e) {
+        // ignore workbook errors
+      }
+    }
+  }
+
+  targetInputs.forEach((input) => {
+    input.addEventListener('input', () => {
+      const co = input.dataset.co;
+      const target = Number(input.value);
+      meta.targets[co] = input.value;
+
+      const row = rows.find((r) => String(r.co || '') === co);
+      if (row) row.targetLevel = Number.isFinite(target) ? target : null;
+
+      const statusCell = hostEl.querySelector(`.final-map-status[data-co="${escapeCssValue(co)}"]`);
+      if (statusCell && row) {
+        statusCell.textContent = calcMetStatus(row.direct, row.targetLevel);
+      }
+      persist();
+    });
+  });
+
+  remarkInputs.forEach((input) => {
+    input.addEventListener('input', () => {
+      const co = input.dataset.co;
+      meta.remarks[co] = input.value;
+      const row = rows.find((r) => String(r.co || '') === co);
+      if (row) row.remarks = input.value;
+      persist();
+    });
+  });
+}
+
 function buildFinalMappingWorkbook(mapping) {
   // mapping.rows: [{co, internalLevel, externalLevel, direct},...]
   const rows = [];
-  rows.push(['CO','Internal','External','Direct']);
-  for (const r of mapping.rows) rows.push([r.co, r.internalLevel == null ? '' : r.internalLevel, r.externalLevel == null ? '' : r.externalLevel, r.direct == null ? '' : r.direct]);
+  rows.push(['Sl.No','CO','Target Level','Attained Level','Met/Not Met','Remarks']);
+  (mapping.rows || []).forEach((r, idx) => {
+    const attained = r.direct == null ? '' : r.direct;
+    const target = r.targetLevel == null ? '' : r.targetLevel;
+    rows.push([
+      idx + 1,
+      r.co,
+      target,
+      attained,
+      calcMetStatus(r.direct, r.targetLevel),
+      r.remarks || ''
+    ]);
+  });
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, 'Final_Attainment_Level_Mapping');

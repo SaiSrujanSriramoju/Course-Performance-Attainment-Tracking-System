@@ -51,9 +51,8 @@
 
     .sidebar-logo img {
       width: 110px;
-      height: auto;
-      display: block;
-      margin: 0 auto 8px;
+      align-items: center;
+      margin-bottom: 4px;
     }
 
     .sidebar-logo h2 {
@@ -62,7 +61,7 @@
     }
 
     .sidebar nav {
-      margin-top: 32px;
+      margin-top: 24px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -189,13 +188,20 @@
       background: #0b3c8c;
     }
 
-    .btn-grey {
-      background: #e0e0e0;
-      color: #333;
+    .btn-outline {
+      background: #fff;
+      color: #555;
+      border: 1px solid #ccc;
     }
 
-    .btn-grey:hover {
-      background: #d5d5d5;
+    .btn-outline:hover {
+      background: #f5f5f5;
+    }
+
+    .btn-disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      box-shadow: none;
     }
 
     .matrix-table {
@@ -217,28 +223,6 @@
     .matrix-table th {
       background: #f7f2f2;
       color: #7b111a;
-    }
-
-    .btn-outline {
-      background: #fff;
-      color: #555;
-      border: 1px solid #ccc;
-    }
-
-    .btn-outline:hover {
-      background: #f5f5f5;
-    }
-
-    .btn-disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      box-shadow: none;
-    }
-
-    .helper-text {
-      font-size: 0.82rem;
-      color: #777;
-      margin-top: 6px;
     }
 
     /* ---------- Drawer (report viewer) ---------- */
@@ -291,7 +275,6 @@
       color: #444;
     }
 
-    /* Area that becomes the report (used also for PDF) */
     #resultsPrintable {
       margin-top: 12px;
       font-size: 0.9rem;
@@ -319,81 +302,11 @@
       margin: 10px 0;
     }
 
-    /* Drawer footer (buttons – UI only, not in PDF) */
     .drawer-footer {
       margin-top: 14px;
       display: flex;
       justify-content: flex-start;
       gap: 8px;
-    }
-
-    .only-ui {
-      /* these are hidden when exporting to PDF (we hide parent) */
-    }
-
-    /* ---------- Attainment modal ---------- */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.4);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 30;
-    }
-
-    .modal-backdrop.open {
-      display: flex;
-    }
-
-    .modal {
-      background: #fff;
-      border-radius: 14px;
-      padding: 18px 20px 16px;
-      width: 360px;
-      max-width: 95vw;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
-    }
-
-    .modal h3 {
-      font-size: 1.1rem;
-      margin-bottom: 6px;
-      color: #a10e1d;
-    }
-
-    .modal p {
-      font-size: 0.86rem;
-      color: #555;
-      margin-bottom: 10px;
-    }
-
-    .modal label {
-      font-size: 0.85rem;
-      display: block;
-      margin-bottom: 3px;
-    }
-
-    .modal input[type="number"] {
-      width: 100%;
-      padding: 6px 8px;
-      margin-bottom: 8px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-      font-size: 0.9rem;
-    }
-
-    .levels-grid {
-      max-height: 180px;
-      overflow-y: auto;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-
-    .level-row {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      margin-bottom: 4px;
     }
 
     .level-row span {

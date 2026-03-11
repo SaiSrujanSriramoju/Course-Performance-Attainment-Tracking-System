@@ -623,11 +623,17 @@
             <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
             <button class="btn btn-green" data-idx="${idx}" data-role="final-map-btn">Final Mapping</button>
           </div>
+          <div class="course-instructions" style="margin-top:14px;">CO-PO Matrix</div>
+          <div id="co-po-matrix-${idx}">Loading CO-PO matrix...</div>
+          <div class="course-instructions" style="margin-top:14px;">PO Attainment (Direct)</div>
+          <div id="po-attainment-${idx}">Loading PO attainment...</div>
           <p class="helper-text">
             Excel format: first row after header = max marks; following rows = students.
           </p>
         `;
         coursesArea.appendChild(card);
+
+        loadCoPoSection(c, idx);
       });
     }
 
@@ -673,6 +679,115 @@
 
       localStorage.setItem("courses", JSON.stringify(mapped));
       return mapped;
+    }
+
+    async function loadCoPoSection(course, idx) {
+      const matrixContainer = document.getElementById(`co-po-matrix-${idx}`);
+      const poContainer = document.getElementById(`po-attainment-${idx}`);
+      if (!matrixContainer || !poContainer) return;
+
+      if (!course.courseId) {
+        matrixContainer.innerHTML = "<p>CO-PO matrix not available for this course.</p>";
+        poContainer.innerHTML = "<p>PO attainment not available for this course.</p>";
+        return;
+      }
+
+      function computeColumnAverages(matrix, poCount) {
+        const averages = [];
+        const rows = Array.isArray(matrix) ? matrix : [];
+        const coCount = rows.length || 0;
+        for (let i = 0; i < poCount; i += 1) {
+          let sum = 0;
+          for (let r = 0; r < coCount; r += 1) {
+            const val = Number(rows[r]?.[i] ?? 0);
+            sum += Number.isFinite(val) ? val : 0;
+          }
+          const avg = coCount ? Number((sum / coCount).toFixed(2)) : 0;
+          averages.push(avg);
+        }
+        return averages;
+      }
+
+      try {
+        const matrixResponse = await fetch(`${API_BASE}/co_po_matrix/${course.courseId}`, { credentials: "include" });
+        const matrixResult = await matrixResponse.json().catch(() => ({}));
+        if (!matrixResponse.ok || matrixResult.success === false) {
+          throw new Error(matrixResult.message || "Failed to load CO-PO matrix");
+        }
+
+        const poCount = Number(matrixResult.po_count || 0) || 0;
+        const coCount = Number(matrixResult.co_count || 0) || 0;
+        const matrix = Array.isArray(matrixResult.matrix) ? matrixResult.matrix : [];
+
+        const poHeaders = Array.from({ length: poCount }, (_, i) => `<th>PO${i + 1}</th>`).join("");
+        const matrixRows = Array.from({ length: coCount }, (_, rowIdx) => {
+          const row = matrix[rowIdx] || [];
+          const cells = Array.from({ length: poCount }, (_, i) => `<td>${row?.[i] ?? 0}</td>`).join("");
+          return `<tr><td>CO${rowIdx + 1}</td>${cells}</tr>`;
+        }).join("");
+
+        const averages = computeColumnAverages(matrix, poCount);
+        const avgCells = averages.map((avg) => `<td>${Number.isFinite(avg) ? avg.toFixed(2) : "0.00"}</td>`).join("");
+
+        matrixContainer.innerHTML = `
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th>CO</th>
+                ${poHeaders}
+              </tr>
+            </thead>
+            <tbody>
+              ${matrixRows || `<tr><td colspan="${Math.max(poCount + 1, 2)}">No matrix data available.</td></tr>`}
+              <tr>
+                <td><strong>Average</strong></td>
+                ${avgCells}
+              </tr>
+            </tbody>
+          </table>
+        `;
+
+        try {
+          const finalResponse = await fetch(`${API_BASE}/final_mapping/${course.courseId}`, { credentials: "include" });
+          const finalResult = await finalResponse.json().catch(() => ({}));
+          if (!finalResponse.ok || finalResult?.success === false) {
+            throw new Error(finalResult.message || "Final mapping not available. Upload exams first.");
+          }
+
+          const rows = Array.isArray(finalResult) ? finalResult : [];
+          const directValues = rows.map((r) => Number(r.direct)).filter((v) => Number.isFinite(v));
+          const totalDirect = directValues.length
+            ? Number((directValues.reduce((a, b) => a + b, 0) / directValues.length).toFixed(2))
+            : NaN;
+
+          const poRows = averages.map((avg, i) => {
+            const value = Number.isFinite(avg) && Number.isFinite(totalDirect)
+              ? Number(((avg * totalDirect) / 3).toFixed(2))
+              : NaN;
+            const display = Number.isFinite(value) ? value.toFixed(2) : "";
+            return `<tr><td>PO${i + 1}</td><td>${display}</td></tr>`;
+          }).join("");
+
+          poContainer.innerHTML = `
+            <table class="matrix-table">
+              <thead>
+                <tr>
+                  <th>PO</th>
+                  <th>Attainment Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${poRows || "<tr><td colspan=\"2\">No PO attainment available.</td></tr>"}
+              </tbody>
+            </table>
+          `;
+        } catch (err) {
+          poContainer.innerHTML = `<p>${err.message || "Failed to load PO attainment"}</p>`;
+        }
+      } catch (err) {
+        matrixContainer.innerHTML = `<p>${err.message || "Failed to load CO-PO matrix"}</p>`;
+        poContainer.innerHTML = `<p>${err.message || "Failed to load PO attainment"}</p>`;
+      }
     }
 
     async function initReports() {
@@ -741,6 +856,7 @@
               above: thresholdData.above,
               percentages: thresholdData.percentages,
               attainment: null,
+              examType: "minor1",
             };
 
             lastPayload = payload;
@@ -1158,6 +1274,41 @@
       return null;
     }
 
+    async function saveExamAttainment(courseId, payload, levelsByCol) {
+      if (!courseId || !payload || !payload.examType || !levelsByCol) return;
+
+      try {
+        const entries = Object.keys(levelsByCol)
+          .filter((key) => key.startsWith("CO-"))
+          .map((key) => ({
+            co_number: Number(key.replace("CO-", "")),
+            attainment: Number(levelsByCol[key])
+          }))
+          .filter((row) => Number.isFinite(row.co_number) && Number.isFinite(row.attainment));
+
+        const examKey = String(payload.examType).toLowerCase();
+        const examHash = entries.length ? JSON.stringify(entries) : "";
+        payload.attainment._lastSavedExamHash = payload.attainment._lastSavedExamHash || {};
+        const lastHash = payload.attainment._lastSavedExamHash[examKey] || "";
+
+        if (entries.length && examHash !== lastHash) {
+          await fetch(`${API_BASE}/save_exam_attainment`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              course_id: courseId,
+              exam_type: examKey,
+              entries
+            })
+          });
+          payload.attainment._lastSavedExamHash[examKey] = examHash;
+        }
+      } catch (err) {
+        // ignore save errors to avoid blocking UI
+      }
+    }
+
     // Compute weighted aggregate percentage across assessments. `weights` is an
     // object like { minor2:0.2, minor3:0.2, major:0.6 }. `values` is an object
     // like { minor2: pct, minor3: pct, major: pct } (pct in 0-100). Missing
@@ -1237,6 +1388,39 @@
         payload.attainment.backendApplied = true;
         payload.attainment._refreshing = false;
         payload.attainment.rangesUpdatedAt = localStorage.getItem(`rangesUpdated_${courseId}`) || payload.attainment.rangesUpdatedAt;
+
+        if (payload.examType) {
+          try {
+            const entries = Object.keys(levelsByCol)
+              .filter((key) => key.startsWith("CO-"))
+              .map((key) => ({
+                co_number: Number(key.replace("CO-", "")),
+                attainment: Number(levelsByCol[key])
+              }))
+              .filter((row) => Number.isFinite(row.co_number) && Number.isFinite(row.attainment));
+
+            const examKey = String(payload.examType).toLowerCase();
+            const examHash = entries.length ? JSON.stringify(entries) : "";
+            payload.attainment._lastSavedExamHash = payload.attainment._lastSavedExamHash || {};
+            const lastHash = payload.attainment._lastSavedExamHash[examKey] || "";
+
+            if (entries.length && examHash !== lastHash) {
+              await fetch(`${API_BASE}/save_exam_attainment`, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  course_id: courseId,
+                  exam_type: examKey,
+                  entries
+                })
+              });
+              payload.attainment._lastSavedExamHash[examKey] = examHash;
+            }
+          } catch (err) {
+            // ignore save errors to avoid blocking UI
+          }
+        }
 
         renderReport(payload);
       } catch (err) {
@@ -1393,6 +1577,7 @@
         payload.attainment.levelsByCol = levelsByCol;
         // persist this change so downloads include it
         try { saveReportForCourse(activeCourseIndex, payload); } catch (e) { /* ignore */ }
+        saveExamAttainment(currentCourseId, payload, levelsByCol);
       }
 
       const tPercent = payload.thresholdPercent;

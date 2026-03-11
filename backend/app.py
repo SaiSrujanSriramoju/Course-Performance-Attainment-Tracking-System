@@ -2,6 +2,7 @@ from datetime import datetime
 from functools import wraps
 import math
 import os
+import re
 
 from flask import Flask, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
@@ -38,6 +39,124 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_SYLLABUS_SIZE_BYTES
 def allowed_syllabus_file(filename):
     _, ext = os.path.splitext(filename)
     return ext.lower() in ALLOWED_SYLLABUS_EXTENSIONS
+
+
+def _normalize_pdf_cell(value):
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _parse_po_number(label):
+    if not label:
+        return None
+    match = re.search(r"po\s*-?\s*(\d+)", label, re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _parse_co_number(label):
+    if not label:
+        return None
+    match = re.search(r"co\s*-?\s*(\d+)", label, re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def parse_co_po_matrix_from_pdf(file_path):
+    try:
+        import pdfplumber
+    except Exception as exc:
+        raise RuntimeError("pdfplumber not installed") from exc
+
+    matrices = []
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables() or []
+            for table in tables:
+                if not table:
+                    continue
+                normalized = [[_normalize_pdf_cell(cell) for cell in row] for row in table]
+
+                header_row = None
+                header_idx = None
+                for idx, row in enumerate(normalized):
+                    po_hits = [c for c in row if _parse_po_number(c) is not None]
+                    if len(po_hits) >= 6:
+                        header_row = row
+                        header_idx = idx
+                        break
+
+                if header_row is None:
+                    continue
+
+                po_numbers = []
+                for cell in header_row:
+                    po_num = _parse_po_number(cell)
+                    if po_num is not None:
+                        po_numbers.append(po_num)
+
+                if not po_numbers:
+                    continue
+
+                data_rows = normalized[header_idx + 1 :]
+                matrix = {}
+                for row in data_rows:
+                    if not row:
+                        continue
+                    co_num = _parse_co_number(row[0])
+                    if co_num is None:
+                        continue
+                    values = []
+                    for cell in row[1 : 1 + len(po_numbers)]:
+                        try:
+                            values.append(int(str(cell).strip()))
+                        except (TypeError, ValueError):
+                            values.append(0)
+                    if values:
+                        matrix[co_num] = values
+
+                if matrix:
+                    matrices.append((po_numbers, matrix))
+
+    if not matrices:
+        return None
+
+    po_numbers, matrix = matrices[0]
+    return {"po_numbers": po_numbers, "matrix": matrix}
+
+
+def save_co_po_matrix(course_id, parsed):
+    if not parsed:
+        return False
+
+    po_numbers = parsed.get("po_numbers") or []
+    matrix = parsed.get("matrix") or {}
+    if not po_numbers or not matrix:
+        return False
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM co_po_matrix WHERE course_id=%s", (course_id,))
+        rows = []
+        for co_num, values in matrix.items():
+            for idx, po_num in enumerate(po_numbers):
+                value = values[idx] if idx < len(values) else 0
+                rows.append((course_id, int(co_num), int(po_num), int(value)))
+        if rows:
+            cursor.executemany(
+                "INSERT INTO co_po_matrix (course_id, co_number, po_number, value) VALUES (%s, %s, %s, %s)",
+                rows,
+            )
+        conn.commit()
+        return True
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def json_response(payload, status=200):
@@ -633,6 +752,13 @@ def create_course():
             ),
         )
         conn.commit()
+        course_id = cursor.lastrowid
+        if ext.lower() == ".pdf" and course_id:
+            try:
+                parsed = parse_co_po_matrix_from_pdf(file_path)
+                save_co_po_matrix(course_id, parsed)
+            except Exception:
+                pass
         return json_response({"success": True, "syllabus_path": syllabus_path}, 201)
     finally:
         cursor.close()
@@ -729,6 +855,28 @@ def delete_course(course_id):
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM Course_Faculty WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM co_attainment WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM co_attainment_levels WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM co_po_matrix WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM minor1_attainment WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM minor2_attainment WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM minor3_attainment WHERE course_id=%s", (course_id,))
+        cursor.execute("DELETE FROM major_attainment WHERE course_id=%s", (course_id,))
+
+        cursor.execute(
+            "DELETE FROM CO_Thresholds WHERE co_id IN (SELECT co_id FROM Course_Outcomes WHERE course_id=%s)",
+            (course_id,),
+        )
+        cursor.execute(
+            "DELETE FROM Student_Scores WHERE co_id IN (SELECT co_id FROM Course_Outcomes WHERE course_id=%s)",
+            (course_id,),
+        )
+        cursor.execute(
+            "DELETE FROM Attainment_Levels WHERE co_id IN (SELECT co_id FROM Course_Outcomes WHERE course_id=%s)",
+            (course_id,),
+        )
+        cursor.execute("DELETE FROM Course_Outcomes WHERE course_id=%s", (course_id,))
+
         cursor.execute("DELETE FROM Courses WHERE course_id=%s", (course_id,))
         conn.commit()
         if cursor.rowcount == 0:

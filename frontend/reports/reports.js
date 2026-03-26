@@ -31,6 +31,30 @@ function escapeCssValue(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\"");
 }
 
+function extractCourseCodeFromSyllabus(course) {
+  const path = course && course.syllabusPath ? String(course.syllabusPath) : "";
+  const filename = path.split("/").pop() || "";
+  const base = filename.split(".")[0] || "";
+  const match = base.match(/[A-Za-z]{2,}\s*\d{2,4}/);
+  if (match) return match[0].replace(/\s+/g, "");
+  const direct = course && course.courseCode ? String(course.courseCode).trim() : "";
+  return direct;
+}
+
+function formatCourseCodeDisplay(code) {
+  if (!code) return "";
+  const compact = String(code).replace(/\s+/g, "");
+  const match = compact.match(/^([A-Za-z]+)(\d+)$/);
+  if (!match) return compact;
+  return `${match[1].toUpperCase()} ${match[2]}`;
+}
+
+function parseCoNumber(label) {
+  if (!label) return NaN;
+  const match = String(label).match(/(\d+)/);
+  return match ? Number(match[1]) : NaN;
+}
+
 function looksLikeRoll(val) {
   if (val == null) return false;
   const s = String(val).trim().toUpperCase();
@@ -271,6 +295,8 @@ async function fetchAssignedCourses() {
   const mapped = (result.courses || []).map((c) => ({
     courseId: c.course_id,
     courseCode: c.course_code,
+    syllabusPath: c.syllabus_path,
+    numberOfCos: c.number_of_cos,
     name: c.course_name,
     batch: c.batch_name || "",
     passPercent: c.passing_marks,
@@ -1328,8 +1354,37 @@ async function generateFinalAttainmentMapping(idx) {
       };
     });
 
+    const courseCodeRaw = extractCourseCodeFromSyllabus(course);
+    const courseCodeCompact = String(courseCodeRaw || '').replace(/\s+/g, '');
+    const courseCodeDisplay = formatCourseCodeDisplay(courseCodeRaw);
+
+    const byCoNum = {};
+    normalized.forEach((row) => {
+      const coNum = parseCoNumber(row.co);
+      if (Number.isFinite(coNum)) byCoNum[coNum] = row;
+    });
+
+    const countFromCourse = Number(course.numberOfCos || course.number_of_cos);
+    const maxCoFromData = Object.keys(byCoNum).length
+      ? Math.max(...Object.keys(byCoNum).map((n) => Number(n)))
+      : 0;
+    const coCount = Number.isFinite(countFromCourse) && countFromCourse > 0
+      ? countFromCourse
+      : maxCoFromData;
+
+    const tableRows = [];
+    for (let i = 1; i <= coCount; i += 1) {
+      const base = byCoNum[i] || { internalLevel: null, externalLevel: null, direct: null };
+      const coLabel = courseCodeCompact ? `${courseCodeCompact}.${i}` : `CO-${i}`;
+      tableRows.push({
+        ...base,
+        co: coLabel,
+        coNumber: i
+      });
+    }
+
     const meta = loadFinalMappingMeta(course.courseId);
-    const enriched = normalized.map((row) => {
+    const enriched = tableRows.map((row) => {
       const key = String(row.co || '');
       const targetRaw = meta.targets[key];
       const target = targetRaw === '' || targetRaw == null ? null : Number(targetRaw);
@@ -1348,7 +1403,7 @@ async function generateFinalAttainmentMapping(idx) {
                       `; CO-6 local internal=${li[6]} external=${le[6]} | backend internal=${b6?.internal} external=${b6?.external}`;
 
     console.log(debugInfo);
-    const html = buildFinalMappingHtml(courseName, enriched, debugInfo);
+    const html = buildFinalMappingHtml(courseName, courseCodeDisplay, enriched, debugInfo);
     const targetContainer = document.getElementById(`final-mapping-${idx}`);
     if (targetContainer) {
       targetContainer.innerHTML = html;
@@ -1402,11 +1457,13 @@ function saveFinalMappingMeta(courseId, meta) {
 
 function calcMetStatus(attained, target) {
   if (!Number.isFinite(attained) || !Number.isFinite(target)) return '';
-  return attained > target ? 'Met' : 'Not Met';
+  return attained >= target ? 'MET' : 'NotMet';
 }
 
-function buildFinalMappingHtml(courseName, rows, debugInfo) {
-  let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div><div class="section-separator"></div></div>`;
+function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo) {
+  let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div>` +
+    `<div style="font-size:0.9rem;margin-top:4px;">Course Code : ${escapeHtml(courseCodeDisplay || "")}</div>` +
+    `<div class="section-separator"></div></div>`;
   if (debugInfo) {
     html += `<div style="margin:6px 0 10px;padding:6px 8px;border:1px dashed #b45;color:#7a1f2b;font-size:0.8rem;">${escapeHtml(debugInfo)}</div>`;
   }

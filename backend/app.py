@@ -66,6 +66,20 @@ def _parse_co_number(label):
     return int(match.group(1))
 
 
+def _extract_co_numbers_from_text(text):
+    if not text:
+        return []
+    hits = re.findall(r"\bco\s*-?\s*(\d+)\b", text, flags=re.IGNORECASE)
+    hits += re.findall(r"\bcourse\s+outcome\s*(\d+)\b", text, flags=re.IGNORECASE)
+    values = []
+    for item in hits:
+        try:
+            values.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return values
+
+
 def parse_co_po_matrix_from_pdf(file_path):
     try:
         import pdfplumber
@@ -127,6 +141,74 @@ def parse_co_po_matrix_from_pdf(file_path):
 
     po_numbers, matrix = matrices[0]
     return {"po_numbers": po_numbers, "matrix": matrix}
+
+
+def extract_co_count_from_pdf(file_path):
+    try:
+        import pdfplumber
+    except Exception:
+        return None
+
+    co_numbers = set()
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            co_numbers.update(_extract_co_numbers_from_text(text))
+    if not co_numbers:
+        return None
+    return max(co_numbers)
+
+
+def extract_co_count_from_docx(file_path):
+    try:
+        import docx
+    except Exception:
+        return None
+
+    co_numbers = set()
+    document = docx.Document(file_path)
+    for paragraph in document.paragraphs:
+        co_numbers.update(_extract_co_numbers_from_text(paragraph.text))
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                co_numbers.update(_extract_co_numbers_from_text(cell.text))
+    if not co_numbers:
+        return None
+    return max(co_numbers)
+
+
+def extract_co_count_from_doc(file_path):
+    try:
+        import textract
+    except Exception:
+        return None
+
+    try:
+        raw = textract.process(file_path)
+    except Exception:
+        return None
+
+    text = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+    co_numbers = _extract_co_numbers_from_text(text)
+    if not co_numbers:
+        return None
+    return max(co_numbers)
+
+
+def extract_co_count_from_syllabus_path(file_path):
+    if not file_path or not os.path.isfile(file_path):
+        return None
+
+    _, ext = os.path.splitext(file_path)
+    ext = ext.lower()
+    if ext == ".pdf":
+        return extract_co_count_from_pdf(file_path)
+    if ext == ".docx":
+        return extract_co_count_from_docx(file_path)
+    if ext == ".doc":
+        return extract_co_count_from_doc(file_path)
+    return None
 
 
 def save_co_po_matrix(course_id, parsed):
@@ -734,6 +816,23 @@ def create_course():
     number_of_cos = form.get("number_of_cos")
     number_of_cos = int(number_of_cos) if number_of_cos else None
 
+    if not number_of_cos:
+        if ext.lower() == ".pdf":
+            try:
+                number_of_cos = extract_co_count_from_pdf(file_path)
+            except Exception:
+                number_of_cos = None
+        elif ext.lower() == ".docx":
+            try:
+                number_of_cos = extract_co_count_from_docx(file_path)
+            except Exception:
+                number_of_cos = None
+        elif ext.lower() == ".doc":
+            try:
+                number_of_cos = extract_co_count_from_doc(file_path)
+            except Exception:
+                number_of_cos = None
+
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -810,6 +909,49 @@ def get_syllabus_for_course(course_id):
         if not os.path.isfile(file_path):
             return json_response({"success": False, "message": "Syllabus file missing"}, 404)
         return send_file(file_path, as_attachment=False)
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/syllabus/<int:course_id>/co-count", methods=["GET"])
+@role_required("faculty")
+def get_syllabus_co_count(course_id):
+    faculty_id = session.get("faculty_id")
+    if not faculty_assigned_to_course(course_id, faculty_id):
+        return json_response({"success": False, "message": "Forbidden"}, 403)
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT syllabus_path, number_of_cos FROM Courses WHERE course_id=%s",
+            (course_id,),
+        )
+        row = cursor.fetchone() or {}
+        stored_count = row.get("number_of_cos")
+        if stored_count:
+            return json_response({"success": True, "co_count": int(stored_count)})
+
+        syllabus_path = row.get("syllabus_path")
+        if not syllabus_path:
+            return json_response({"success": True, "co_count": 0})
+
+        file_path = os.path.join(BASE_DIR, syllabus_path)
+        try:
+            count = extract_co_count_from_syllabus_path(file_path)
+        except Exception:
+            count = None
+
+        count_value = int(count) if count else 0
+        if count_value:
+            cursor.execute(
+                "UPDATE Courses SET number_of_cos=%s WHERE course_id=%s",
+                (count_value, course_id),
+            )
+            conn.commit()
+
+        return json_response({"success": True, "co_count": count_value})
     finally:
         cursor.close()
         conn.close()
@@ -1264,10 +1406,6 @@ def get_final_mapping(course_id):
     minor2_cos = [co for co in co_numbers if co in (3, 4)]
     minor3_cos = [co for co in co_numbers if co in (5, 6)]
 
-    unsupported_cos = [co for co in co_numbers if co not in (1, 2, 3, 4, 5, 6)]
-    if unsupported_cos:
-        return json_response({"success": False, "message": "Unsupported CO mapping"}, 400)
-
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -1276,22 +1414,15 @@ def get_final_mapping(course_id):
         minor3_raw = fetch_attainment_by_co(cursor, "minor3_attainment", course_id, minor3_cos)
         major_raw = fetch_attainment_by_co(cursor, "major_attainment", course_id, co_numbers)
 
-        missing = []
-
         def normalize_values(raw_map, cos):
             normalized = {}
             for co in cos:
-                if co not in raw_map:
-                    missing.append(co)
-                    continue
                 try:
                     value = float(raw_map.get(co))
                 except (TypeError, ValueError):
-                    missing.append(co)
-                    continue
+                    value = 0.0
                 if not math.isfinite(value):
-                    missing.append(co)
-                    continue
+                    value = 0.0
                 normalized[co] = value
             return normalized
 
@@ -1300,18 +1431,15 @@ def get_final_mapping(course_id):
         minor3_map = normalize_values(minor3_raw, minor3_cos)
         major_map = normalize_values(major_raw, co_numbers)
 
-        if missing:
-            return json_response({"success": False, "message": "Upload all exams first"}, 400)
-
-        internal_by_co = {}
+        internal_by_co = {co: 0.0 for co in co_numbers}
         internal_by_co.update(minor1_map)
         internal_by_co.update(minor2_map)
         internal_by_co.update(minor3_map)
 
         results = []
         for co in co_numbers:
-            internal = internal_by_co.get(co)
-            external = major_map.get(co)
+            internal = internal_by_co.get(co, 0.0)
+            external = major_map.get(co, 0.0)
             direct = round((internal * 0.4) + (external * 0.6), 2)
             results.append({
                 "co": f"CO{co}",

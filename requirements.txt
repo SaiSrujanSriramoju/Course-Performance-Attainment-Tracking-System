@@ -4,3 +4,5 @@ flask>=2.2
 flask-cors>=4.0
 mysql-connector-python>=8.0
 pdfplumber>=0.10
+python-docx>=0.8.11
+textract>=1.6

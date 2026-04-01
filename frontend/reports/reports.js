@@ -1368,9 +1368,26 @@ async function generateFinalAttainmentMapping(idx) {
     const maxCoFromData = Object.keys(byCoNum).length
       ? Math.max(...Object.keys(byCoNum).map((n) => Number(n)))
       : 0;
-    const coCount = Number.isFinite(countFromCourse) && countFromCourse > 0
+
+    let coCount = Number.isFinite(countFromCourse) && countFromCourse > 0
       ? countFromCourse
-      : maxCoFromData;
+      : 0;
+
+    if (!coCount && course.syllabusPath) {
+      try {
+        const resp = await fetch(`${API_BASE}/syllabus/${course.courseId}/co-count`, { credentials: 'include' });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data && Number.isFinite(Number(data.co_count))) {
+          coCount = Number(data.co_count);
+        }
+      } catch (err) {
+        // ignore syllabus CO count errors
+      }
+    }
+
+    if (!coCount) {
+      coCount = maxCoFromData;
+    }
 
     const tableRows = [];
     for (let i = 1; i <= coCount; i += 1) {

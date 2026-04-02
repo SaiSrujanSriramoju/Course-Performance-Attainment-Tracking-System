@@ -327,6 +327,40 @@
       gap: 8px;
     }
 
+    .pdf-root {
+      width: 900px;
+      background: #fff;
+      color: #222;
+      padding: 24px;
+    }
+
+    .pdf-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid #e5e5e5;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+
+    .pdf-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #a10e1d;
+    }
+
+    .pdf-subtitle {
+      font-size: 0.88rem;
+      color: #555;
+      margin-top: 2px;
+    }
+
+    .pdf-meta {
+      font-size: 0.82rem;
+      color: #666;
+      white-space: nowrap;
+    }
+
     .only-ui {
       /* these are hidden when exporting to PDF (we hide parent) */
     }
@@ -601,6 +635,7 @@
       courses.forEach((c, idx) => {
         const card = document.createElement("div");
         card.className = "course-card";
+        card.dataset.courseIdx = idx;
 
         const passing = c.passingPercent ?? c.passPercent ?? c.passing ?? "";
 
@@ -624,6 +659,9 @@
           <p class="helper-text">
             Excel format: first row after header = max marks; following rows = students.
           </p>
+          <div class="download-row">
+            <button class="btn btn-primary btn-disabled" data-role="download-pdf" data-idx="${idx}" disabled>Download Report (PDF)</button>
+          </div>
         `;
         coursesArea.appendChild(card);
       });
@@ -649,6 +687,8 @@
         generateFinalAttainmentMapping(idx);
       } else if (role === "view-last-btn") {
         handleViewLastReport(idx);
+      } else if (role === "download-pdf") {
+        handlePdfDownloadClick(idx);
       }
     });
 
@@ -1539,6 +1579,7 @@
     // ========= FINAL ATTAINMENT MAPPING =========
     // Compute final mapping using minors (internal) and major (external)
     async function generateFinalAttainmentMapping(idx) {
+      activeCourseIndex = idx;
       const course = (loadCourses() || [])[idx];
       if (!course) {
         alert('Course not found');
@@ -1748,7 +1789,146 @@
       openDrawerForCourse(idx);
     }
 
-    // PDF download functionality removed
+    function sanitizeFilename(name) {
+      return String(name || "report")
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .replace(/\s+/g, "_")
+        .replace(/_+/g, "_")
+        .trim();
+    }
+
+    async function downloadReportPdf(idx) {
+      const card = coursesArea.querySelector(`.course-card[data-course-idx="${idx}"]`);
+      const printable = document.getElementById("resultsPrintable");
+      const targetNode = card || printable;
+      if (!targetNode || !targetNode.innerHTML.trim()) {
+        alert("No report content to download. Please generate a report first.");
+        return;
+      }
+
+      const titleEl = document.getElementById("drawerCourseTitle");
+      const batchEl = document.getElementById("drawerBatchInfo");
+      const courseTitle = (titleEl && titleEl.textContent ? titleEl.textContent.trim() : "Course Report");
+      const batchText = (batchEl && batchEl.textContent ? batchEl.textContent.trim() : "");
+      const examTag = lastPayload && lastPayload.examType ? String(lastPayload.examType).toUpperCase() : "";
+
+      const temp = document.createElement("div");
+      temp.className = "pdf-root";
+      temp.style.position = "fixed";
+      temp.style.left = "-10000px";
+      temp.style.top = "0";
+      temp.style.zIndex = "-1";
+
+      const safeTitle = courseTitle.replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+      const safeBatch = batchText.replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+
+      temp.innerHTML = `
+        <div class="pdf-header">
+          <div>
+            <div class="pdf-title">${safeTitle}</div>
+            ${safeBatch ? `<div class="pdf-subtitle">${safeBatch}</div>` : ""}
+          </div>
+          <div class="pdf-meta">${new Date().toLocaleDateString()}</div>
+        </div>
+      `;
+      if (examTag) {
+        const examNode = document.createElement("div");
+        examNode.className = "pdf-subtitle";
+        examNode.textContent = `Exam: ${examTag}`;
+        temp.appendChild(examNode);
+      }
+
+      const clone = targetNode.cloneNode(true);
+      const removeSelectors = [".course-actions", ".download-row", "button", ".drawer-header", ".drawer-footer", ".only-ui"];
+      removeSelectors.forEach((sel) => {
+        clone.querySelectorAll(sel).forEach((node) => node.remove());
+      });
+      clone.querySelectorAll("input").forEach((input) => {
+        const span = document.createElement("span");
+        span.textContent = input.value || "";
+        span.style.display = "inline-block";
+        span.style.minWidth = input.type === "number" ? "36px" : "80px";
+        span.style.padding = "2px 4px";
+        span.style.border = "1px solid #ddd";
+        span.style.borderRadius = "4px";
+        input.replaceWith(span);
+      });
+      temp.appendChild(clone);
+      document.body.appendChild(temp);
+
+      try {
+        const canvas = await html2canvas(temp, {
+          scale: 2,
+          backgroundColor: "#ffffff",
+          useCORS: true
+        });
+
+        const jsPDFLib = window.jspdf && window.jspdf.jsPDF;
+        if (!jsPDFLib) {
+          alert("PDF library not available.");
+          return;
+        }
+
+        const pdf = new jsPDFLib("p", "pt", "a4");
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 24;
+        const imgWidth = pageWidth - margin * 2;
+        const pageHeightPx = Math.floor((pageHeight - margin * 2) * (canvas.width / imgWidth));
+
+        let y = 0;
+        while (y < canvas.height) {
+          const sliceHeight = Math.min(pageHeightPx, canvas.height - y);
+          const trimTop = y === 0 ? 0 : 6;
+          const effectiveHeight = Math.max(sliceHeight - trimTop, 1);
+          const slice = document.createElement("canvas");
+          slice.width = canvas.width;
+          slice.height = effectiveHeight;
+          const ctx = slice.getContext("2d");
+          ctx.drawImage(canvas, 0, y + trimTop, canvas.width, effectiveHeight, 0, 0, canvas.width, effectiveHeight);
+
+          const imgData = slice.toDataURL("image/png");
+          const imgHeight = (effectiveHeight * imgWidth) / canvas.width;
+          if (y > 0) pdf.addPage();
+          pdf.addImage(imgData, "PNG", margin, margin, imgWidth, imgHeight);
+          y += sliceHeight;
+        }
+
+        const baseName = sanitizeFilename(`${courseTitle}${examTag ? "_" + examTag : ""}_Report`);
+        pdf.save(`${baseName}.pdf`);
+      } catch (err) {
+        console.error("PDF export failed", err);
+        alert("PDF export failed: " + err.message);
+      } finally {
+        if (temp && temp.parentNode) temp.parentNode.removeChild(temp);
+      }
+    }
+
+    function handlePdfDownloadClick(idx) {
+      if (typeof idx !== "number" || Number.isNaN(idx)) return;
+
+      if (!lastPayload || activeCourseIndex !== idx) {
+        const payload = loadReportForCourse(idx);
+        if (!payload) {
+          alert("No saved report for this course yet. Please upload marks Excel first.");
+          return;
+        }
+        if (payload.attainment) {
+          payload.attainment.backendApplied = false;
+          delete payload.attainment.levelsByCol;
+        }
+        payload.thresholdsApplied = false;
+        activeCourseIndex = idx;
+        lastPayload = payload;
+        renderReport(payload);
+      }
+
+      downloadReportPdf(idx);
+    }
 
     // Download generated XLSX (available after any report generation)
     const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');

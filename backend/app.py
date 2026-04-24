@@ -1,5 +1,6 @@
 from datetime import datetime
 from functools import wraps
+from io import BytesIO
 import math
 import os
 import re
@@ -7,6 +8,8 @@ import re
 from flask import Flask, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+
+import pandas as pd
 
 from db import get_db_connection, init_db
 
@@ -351,6 +354,124 @@ def get_exam_table(exam_type):
         "major": "major_attainment",
     }
     return mapping.get(str(exam_type).lower())
+
+
+def get_exam_co_columns(exam_type):
+    mapping = {
+        "minor1": [1, 2],
+        "minor2": [3, 4],
+        "minor3": [5, 6],
+        "major": [1, 2, 3, 4, 5, 6],
+    }
+    return mapping.get(str(exam_type).strip().lower())
+
+
+def extract_co_value(data, co_number):
+    if not isinstance(data, dict):
+        return None
+    for key, value in data.items():
+        if key is None:
+            continue
+        match = re.search(r"co\s*[-_]?\s*(\d+)", str(key), re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            if int(match.group(1)) == int(co_number):
+                return value
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def normalize_mark_cell(value):
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text == "":
+        return ""
+    if text.lower() == "ab":
+        return "AB"
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return ""
+    if math.isnan(number) or math.isinf(number):
+        return ""
+    return int(number) if number.is_integer() else number
+
+
+@app.route("/api/export_excel", methods=["POST"])
+@role_required("faculty")
+def export_marks_excel():
+    data, error = get_request_json()
+    if error:
+        return error
+
+    exam_type = (data.get("exam_type") or "").strip().lower()
+    rows = data.get("data")
+    max_marks = data.get("max_marks")
+
+    co_numbers = get_exam_co_columns(exam_type)
+    if not co_numbers:
+        return json_response({"success": False, "message": "Invalid exam_type"}, 400)
+    if not isinstance(rows, list) or not rows:
+        return json_response({"success": False, "message": "data list required"}, 400)
+    if not isinstance(max_marks, dict):
+        return json_response({"success": False, "message": "max_marks object required"}, 400)
+
+    headers = ["Roll No"] + [f"CO-{co}" for co in co_numbers] + ["Tot"]
+
+    max_row = ["Max Marks"]
+    max_total = 0
+    for co in co_numbers:
+        raw = extract_co_value(max_marks, co)
+        normalized = normalize_mark_cell(raw)
+        if normalized == "" or str(normalized).lower() == "ab":
+            return json_response({"success": False, "message": f"Missing max marks for CO-{co}"}, 400)
+        try:
+            max_total += float(normalized)
+        except (TypeError, ValueError):
+            return json_response({"success": False, "message": f"Invalid max marks for CO-{co}"}, 400)
+        max_row.append(normalized)
+    max_row.append(int(max_total) if float(max_total).is_integer() else round(max_total, 2))
+
+    student_rows = []
+    for entry in rows:
+        if not isinstance(entry, dict):
+            continue
+        roll = str(entry.get("roll") or "").strip()
+        if not roll:
+            continue
+        row = [roll]
+        total = 0
+        for co in co_numbers:
+            raw = extract_co_value(entry, co)
+            normalized = normalize_mark_cell(raw)
+            row.append(normalized)
+            try:
+                total += float(normalized) if normalized not in ("", "AB") else 0
+            except (TypeError, ValueError):
+                total += 0
+        total_cell = int(total) if float(total).is_integer() else round(total, 2)
+        row.append(total_cell)
+        student_rows.append(row)
+
+    if not student_rows:
+        return json_response({"success": False, "message": "No valid student rows found"}, 400)
+
+    df = pd.DataFrame([max_row] + student_rows, columns=headers)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Marks")
+
+    output.seek(0)
+    filename = f"{exam_type}_marks.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def load_attainment_ranges(course_id, faculty_id):

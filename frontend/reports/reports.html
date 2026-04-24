@@ -225,6 +225,90 @@
       color: #7b111a;
     }
 
+    /* ---------- Marks entry (Excel-like grid) ---------- */
+    .marks-entry {
+      margin-top: 14px;
+      padding: 12px 12px 8px;
+      border: 1px solid #eee;
+      border-radius: 12px;
+      background: #fbfbfb;
+    }
+
+    .marks-entry-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .marks-entry-toolbar label {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #444;
+    }
+
+    .marks-entry-toolbar select {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 0.9rem;
+      background: #fff;
+    }
+
+    .marks-grid {
+      overflow-x: auto;
+    }
+
+    .marks-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid #e6e6e6;
+    }
+
+    .marks-table th,
+    .marks-table td {
+      border: 1px solid #e6e6e6;
+      padding: 6px 8px;
+      text-align: center;
+      font-size: 0.88rem;
+    }
+
+    .marks-table th {
+      background: #f4f4f4;
+      color: #5a0b12;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .marks-table input {
+      width: 100%;
+      padding: 6px 6px;
+      border: 1px solid #d6d6d6;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      text-align: center;
+      background: #fff;
+    }
+
+    .marks-table input[readonly] {
+      background: #f7f7f7;
+      color: #333;
+    }
+
+    .marks-table .input-error {
+      border-color: #c62828;
+      background: #fff5f5;
+    }
+
+    .btn-small {
+      padding: 6px 10px;
+      font-size: 0.82rem;
+    }
+
     /* ---------- Drawer (report viewer) ---------- */
     .drawer {
       position: fixed;
@@ -485,12 +569,19 @@
     // ========= CONFIG =========
     const ROLL_COL = "Roll No";
     const COLS = ["CO-1", "CO-2", "Tot"];
+    const EXAM_CO_MAP = {
+      minor1: ["CO-1", "CO-2"],
+      minor2: ["CO-3", "CO-4"],
+      minor3: ["CO-5", "CO-6"],
+      major: ["CO-1", "CO-2", "CO-3", "CO-4", "CO-5", "CO-6"]
+    };
 
     // ========= STATE =========
     let courses = [];
     let activeCourseIndex = null;       // which course is currently being processed
     let lastPayload = null;             // last computed report for the active course (includes attainment)
     let currentSummaryWithoutAtt = null;// summary before attainment so we can re-apply if needed
+    const marksEntryState = {};
 
     // ========= UTILS =========
     function loadCourses() {
@@ -512,6 +603,332 @@
 
     function escapeCssValue(value) {
       return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+    }
+
+    function escapeSelectorValue(value) {
+      if (window.CSS && typeof window.CSS.escape === "function") {
+        return window.CSS.escape(String(value));
+      }
+      return String(value).replace(/[\\"]/g, "\\$&");
+    }
+
+    function getExamColumns(examType) {
+      return EXAM_CO_MAP[String(examType || "minor1").toLowerCase()] || EXAM_CO_MAP.minor1;
+    }
+
+    function normalizeMarkInputValue(raw) {
+      const value = String(raw || "").trim();
+      if (value === "") return "";
+      if (/^ab$/i.test(value)) return "AB";
+      if (/^\d+(\.\d+)?$/.test(value)) return value;
+      return null;
+    }
+
+    function markToNumber(value) {
+      if (value == null) return 0;
+      const v = String(value).trim();
+      if (v === "" || /^ab$/i.test(v)) return 0;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function updateRowTotal(rowEl, coCols) {
+      if (!rowEl) return;
+      let total = 0;
+      coCols.forEach((col) => {
+        const input = rowEl.querySelector(`input[data-role="mark"][data-col="${col}"]`);
+        if (!input) return;
+        total += markToNumber(input.value);
+      });
+      const totalInput = rowEl.querySelector('input[data-role="total"]');
+      if (totalInput) totalInput.value = total;
+    }
+
+    function updateMaxTotal(tableEl, coCols) {
+      if (!tableEl) return;
+      const maxRow = tableEl.querySelector('tr[data-row="max"]');
+      if (!maxRow) return;
+      let total = 0;
+      coCols.forEach((col) => {
+        const input = maxRow.querySelector(`input[data-role="max"][data-col="${col}"]`);
+        if (!input) return;
+        total += markToNumber(input.value);
+      });
+      const totalInput = maxRow.querySelector('input[data-role="total"]');
+      if (totalInput) totalInput.value = total;
+    }
+
+    function getNextRollValue(tableEl) {
+      if (!tableEl) return "";
+      const rows = Array.from(tableEl.querySelectorAll('tr[data-row="student"]'));
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        const input = rows[i].querySelector('input[data-role="roll"]');
+        const value = input ? input.value.trim() : "";
+        if (!value) continue;
+        const match = value.match(/^(.*?)(\d+)$/);
+        if (!match) return "";
+        const prefix = match[1];
+        const numStr = match[2];
+        const nextNum = String(Number(numStr) + 1).padStart(numStr.length, "0");
+        return `${prefix}${nextNum}`;
+      }
+      return "";
+    }
+
+    function buildStudentRow(coCols, rollValue) {
+      const cells = coCols.map((col) => (
+        `<td><input data-role="mark" data-col="${col}" inputmode="decimal" placeholder="-"></td>`
+      )).join("");
+      const rollAttr = rollValue ? ` value="${escapeHtml(rollValue)}"` : "";
+      return `
+        <tr data-row="student">
+          <td><input data-role="roll" placeholder="24MCMC01"${rollAttr}></td>
+          ${cells}
+          <td><input data-role="total" readonly value="0"></td>
+          <td><button type="button" class="btn btn-outline btn-small" data-role="delete-row">Delete</button></td>
+        </tr>
+      `;
+    }
+
+    function buildCoHeaderCell(col) {
+      const safe = escapeHtml(col);
+      return `<th><input data-role="co-label" data-col="${safe}" data-last-valid="${safe}" value="${safe}" placeholder="CO"></th>`;
+    }
+
+    function updateColumnKey(tableEl, oldKey, newKey) {
+      const trimmed = String(newKey || "").trim();
+      if (!trimmed) return { ok: false, reason: "empty" };
+      const coCols = JSON.parse(tableEl.dataset.coCols || "[]");
+      if (trimmed !== oldKey && coCols.includes(trimmed)) {
+        return { ok: false, reason: "duplicate" };
+      }
+
+      const updated = coCols.map((col) => (col === oldKey ? trimmed : col));
+      tableEl.dataset.coCols = JSON.stringify(updated);
+
+      const selectorKey = escapeSelectorValue(oldKey);
+      const headerInput = tableEl.querySelector(`input[data-role="co-label"][data-col="${selectorKey}"]`);
+      if (headerInput) headerInput.dataset.col = trimmed;
+
+      tableEl.querySelectorAll(`input[data-role="max"][data-col="${selectorKey}"]`).forEach((input) => {
+        input.dataset.col = trimmed;
+      });
+      tableEl.querySelectorAll(`input[data-role="mark"][data-col="${selectorKey}"]`).forEach((input) => {
+        input.dataset.col = trimmed;
+      });
+
+      return { ok: true };
+    }
+
+    function addCoColumn(tableEl) {
+      if (!tableEl) return;
+      const coCols = JSON.parse(tableEl.dataset.coCols || "[]");
+      let maxIndex = 0;
+      coCols.forEach((col) => {
+        const match = String(col).match(/CO-(\d+)/i);
+        if (match) maxIndex = Math.max(maxIndex, Number(match[1]));
+      });
+      const newKey = `CO-${maxIndex + 1 || coCols.length + 1}`;
+      const updated = [...coCols, newKey];
+      tableEl.dataset.coCols = JSON.stringify(updated);
+
+      const headerRow = tableEl.querySelector("thead tr");
+      const totHeader = headerRow ? headerRow.querySelector('th[data-role="total-col"]') : null;
+      if (headerRow) {
+        if (totHeader) {
+          totHeader.insertAdjacentHTML("beforebegin", buildCoHeaderCell(newKey));
+        } else {
+          headerRow.insertAdjacentHTML("beforeend", buildCoHeaderCell(newKey));
+        }
+      }
+
+      const maxRow = tableEl.querySelector('tr[data-row="max"]');
+      if (maxRow) {
+        const totalCell = maxRow.querySelector('input[data-role="total"]')?.closest("td");
+        const cell = document.createElement("td");
+        cell.innerHTML = `<input data-role="max" data-col="${escapeHtml(newKey)}" inputmode="decimal" placeholder="Max">`;
+        maxRow.insertBefore(cell, totalCell || null);
+      }
+
+      const studentRows = tableEl.querySelectorAll('tr[data-row="student"]');
+      studentRows.forEach((row) => {
+        const totalCell = row.querySelector('input[data-role="total"]')?.closest("td");
+        const cell = document.createElement("td");
+        cell.innerHTML = `<input data-role="mark" data-col="${escapeHtml(newKey)}" inputmode="decimal" placeholder="-">`;
+        row.insertBefore(cell, totalCell || null);
+      });
+    }
+
+    function buildMarksTable(container, examType, courseIdx) {
+      const coCols = getExamColumns(examType);
+      const headerCells = coCols.map((col) => buildCoHeaderCell(col)).join("");
+      const maxInputs = coCols.map((col) => (
+        `<td><input data-role="max" data-col="${col}" inputmode="decimal" placeholder="Max"></td>`
+      )).join("");
+
+      container.innerHTML = `
+        <div class="marks-grid">
+          <table class="marks-table" data-course-idx="${courseIdx}">
+            <thead>
+              <tr>
+                <th>Roll No</th>
+                ${headerCells}
+                <th data-role="total-col">Tot</th>
+                <th data-role="action-col">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr data-row="max">
+                <td><strong>Max Marks</strong></td>
+                ${maxInputs}
+                <td><input data-role="total" readonly value="0"></td>
+                <td></td>
+              </tr>
+              ${buildStudentRow(coCols)}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      const table = container.querySelector("table");
+      if (table) {
+        table.dataset.coCols = JSON.stringify(coCols);
+      }
+    }
+
+    function validateMarksBeforeAdd(tableEl, coCols) {
+      if (!tableEl) return { ok: true };
+      const maxRow = tableEl.querySelector('tr[data-row="max"]');
+      const maxByCol = {};
+
+      coCols.forEach((col) => {
+        const input = maxRow ? maxRow.querySelector(`input[data-role="max"][data-col="${col}"]`) : null;
+        maxByCol[col] = input ? toNumberSafe(input.value) : NaN;
+      });
+
+      const studentRows = Array.from(tableEl.querySelectorAll('tr[data-row="student"]'));
+      for (const row of studentRows) {
+        for (const col of coCols) {
+          const input = row.querySelector(`input[data-role="mark"][data-col="${col}"]`);
+          if (!input) continue;
+          const markVal = toNumberSafe(input.value);
+          if (!Number.isFinite(markVal)) continue;
+          const maxVal = maxByCol[col];
+          if (markVal < 0 || (Number.isFinite(maxVal) && markVal > maxVal)) {
+            input.classList.add("input-error");
+            return { ok: false, input };
+          }
+        }
+      }
+      return { ok: true };
+    }
+
+    function collectMarksEntryData(courseIdx) {
+      const container = document.getElementById(`marks-entry-${courseIdx}`);
+      const table = container ? container.querySelector("table.marks-table") : null;
+      if (!table) {
+        throw new Error("Please generate the format first.");
+      }
+
+      const state = marksEntryState[courseIdx] || {};
+      const examType = state.examType || "minor1";
+      const coCols = JSON.parse(table.dataset.coCols || "[]");
+
+      const maxRow = table.querySelector('tr[data-row="max"]');
+      const maxMarks = {};
+      for (const col of coCols) {
+        const input = maxRow ? maxRow.querySelector(`input[data-role="max"][data-col="${col}"]`) : null;
+        const normalized = normalizeMarkInputValue(input ? input.value : "");
+        if (normalized === null || normalized === "" || /^ab$/i.test(normalized)) {
+          throw new Error(`Enter numeric max marks for ${col}.`);
+        }
+        maxMarks[col] = Number(normalized);
+      }
+
+      const students = [];
+      const studentRows = table.querySelectorAll('tr[data-row="student"]');
+      studentRows.forEach((row) => {
+        const rollInput = row.querySelector('input[data-role="roll"]');
+        const roll = rollInput ? rollInput.value.trim() : "";
+        const marks = {};
+        let hasAnyMark = false;
+
+        coCols.forEach((col) => {
+          const input = row.querySelector(`input[data-role="mark"][data-col="${col}"]`);
+          const normalized = normalizeMarkInputValue(input ? input.value : "");
+          if (normalized === null) {
+            throw new Error(`Invalid mark in ${col}. Use numbers or AB.`);
+          }
+          if (normalized !== "") hasAnyMark = true;
+          marks[col] = normalized;
+        });
+
+        if (!roll && !hasAnyMark) return;
+        if (!roll && hasAnyMark) {
+          throw new Error("Enter roll number for all marked rows.");
+        }
+
+        students.push({ roll, marks });
+      });
+
+      if (!students.length) {
+        throw new Error("Add at least one student row with marks.");
+      }
+
+      const payloadData = students.map((row) => {
+        const entry = { roll: row.roll };
+        coCols.forEach((col) => {
+          const coNum = Number(String(col).replace(/[^0-9]/g, ""));
+          const key = `co${coNum}`;
+          const value = row.marks[col];
+          entry[key] = value === "" ? null : value;
+        });
+        return entry;
+      });
+
+      const maxPayload = {};
+      coCols.forEach((col) => {
+        const coNum = Number(String(col).replace(/[^0-9]/g, ""));
+        const key = `co${coNum}`;
+        maxPayload[key] = maxMarks[col];
+      });
+
+      return { examType, data: payloadData, maxMarks: maxPayload };
+    }
+
+    async function handleExportExcel(courseIdx) {
+      try {
+        const payload = collectMarksEntryData(courseIdx);
+        const response = await fetch(`${API_BASE}/export_excel`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            exam_type: payload.examType,
+            data: payload.data,
+            max_marks: payload.maxMarks
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.message || "Failed to export Excel.");
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const course = courses[courseIdx] || {};
+        const name = (course.name || "Course").replace(/\s+/g, "_");
+        link.href = url;
+        link.download = `${name}_${payload.examType}_Marks.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(err.message || "Failed to export Excel.");
+      }
     }
 
     function extractCourseCodeFromSyllabus(course) {
@@ -599,6 +1016,24 @@
             <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
             <button class="btn btn-green" data-idx="${idx}" data-role="final-map-btn">Final Mapping</button>
           </div>
+          <div class="marks-entry" data-idx="${idx}">
+            <div class="marks-entry-toolbar">
+              <label for="examSelect-${idx}">Exam Type</label>
+              <select id="examSelect-${idx}" data-role="exam-select" data-idx="${idx}">
+                <option value="minor1">Minor 1 (CO1, CO2)</option>
+                <option value="minor2">Minor 2 (CO3, CO4)</option>
+                <option value="minor3">Minor 3 (CO5, CO6)</option>
+                <option value="major">Major (CO1-CO6)</option>
+              </select>
+              <button class="btn btn-outline" data-idx="${idx}" data-role="generate-format">Generate Format</button>
+              <button class="btn btn-outline" data-idx="${idx}" data-role="add-co-col">Add CO Column</button>
+              <button class="btn btn-outline btn-disabled" data-idx="${idx}" data-role="add-row" disabled>Add Student Row</button>
+              <button class="btn btn-primary btn-disabled" data-idx="${idx}" data-role="download-excel" disabled>Download Excel</button>
+            </div>
+            <div id="marks-entry-${idx}">
+              <div class="helper-text">Click Generate Format to enter marks in the table.</div>
+            </div>
+          </div>
           <div class="course-instructions" style="margin-top:14px;">Final Attainment Level Mapping</div>
           <div id="final-mapping-${idx}">Click Final Mapping to generate the table.</div>
           <div class="course-instructions" style="margin-top:14px;">CO-PO Matrix</div>
@@ -626,10 +1061,16 @@
     coursesArea.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-role]");
       if (!btn) return;
+      const role = btn.dataset.role;
+      if (role === "delete-row") {
+        const row = btn.closest('tr[data-row="student"]');
+        if (row) row.remove();
+        return;
+      }
+
       const idx = Number(btn.dataset.idx);
       if (Number.isNaN(idx)) return;
 
-      const role = btn.dataset.role;
       if (role === "marks-btn") {
         handleMarksUploadClick(idx);
       } else if (role === "minor2-btn") {
@@ -644,6 +1085,112 @@
         handleViewLastReport(idx);
       } else if (role === "download-pdf") {
         handlePdfDownloadClick(idx);
+      } else if (role === "generate-format") {
+        const select = document.getElementById(`examSelect-${idx}`);
+        const examType = select ? select.value : "minor1";
+        const container = document.getElementById(`marks-entry-${idx}`);
+        if (container) {
+          buildMarksTable(container, examType, idx);
+          marksEntryState[idx] = { examType };
+          const addBtn = coursesArea.querySelector(`button[data-role="add-row"][data-idx="${idx}"]`);
+          const downloadBtn = coursesArea.querySelector(`button[data-role="download-excel"][data-idx="${idx}"]`);
+          if (addBtn) {
+            addBtn.classList.remove("btn-disabled");
+            addBtn.disabled = false;
+          }
+          if (downloadBtn) {
+            downloadBtn.classList.remove("btn-disabled");
+            downloadBtn.disabled = false;
+          }
+        }
+      } else if (role === "add-co-col") {
+        const container = document.getElementById(`marks-entry-${idx}`);
+        const table = container ? container.querySelector("table.marks-table") : null;
+        if (!table) return;
+        addCoColumn(table);
+      } else if (role === "add-row") {
+        const container = document.getElementById(`marks-entry-${idx}`);
+        const table = container ? container.querySelector("table.marks-table") : null;
+        if (!table) return;
+        const coCols = JSON.parse(table.dataset.coCols || "[]");
+        const validation = validateMarksBeforeAdd(table, coCols);
+        if (!validation.ok) {
+          alert("Marks must be between 0 and max marks. Fix before adding a new student.");
+          if (validation.input) validation.input.focus();
+          return;
+        }
+        const tbody = table.querySelector("tbody");
+        if (tbody) {
+          const nextRoll = getNextRollValue(table);
+          tbody.insertAdjacentHTML("beforeend", buildStudentRow(coCols, nextRoll));
+        }
+      } else if (role === "download-excel") {
+        handleExportExcel(idx);
+      }
+    });
+
+    coursesArea.addEventListener("input", (e) => {
+      const input = e.target;
+      if (!(input instanceof HTMLInputElement)) return;
+
+      const table = input.closest("table.marks-table");
+      if (!table) return;
+
+      const coCols = JSON.parse(table.dataset.coCols || "[]");
+      const role = input.dataset.role;
+      if (role === "co-label") {
+        const oldKey = input.dataset.col || "";
+        const nextKey = input.value.trim();
+        const result = updateColumnKey(table, oldKey, nextKey);
+        if (!result.ok) {
+          input.classList.add("input-error");
+          input.value = input.dataset.lastValid || oldKey;
+          return;
+        }
+        input.classList.remove("input-error");
+        input.dataset.lastValid = nextKey;
+        return;
+      }
+      if (role === "mark" || role === "max") {
+        const normalized = normalizeMarkInputValue(input.value);
+        if (normalized === null) {
+          input.classList.add("input-error");
+          input.value = input.dataset.lastValid || "";
+          return;
+        }
+        input.classList.remove("input-error");
+        input.value = normalized;
+        input.dataset.lastValid = normalized;
+      }
+
+      if (role === "mark") {
+        const col = input.dataset.col;
+        const maxRow = table.querySelector('tr[data-row="max"]');
+        const maxInput = maxRow ? maxRow.querySelector(`input[data-role="max"][data-col="${col}"]`) : null;
+        const maxVal = maxInput ? toNumberSafe(maxInput.value) : NaN;
+        const markVal = toNumberSafe(input.value);
+        if (Number.isFinite(markVal) && (markVal < 0 || (Number.isFinite(maxVal) && markVal > maxVal))) {
+          input.classList.add("input-error");
+          input.value = input.dataset.lastValid || "";
+          return;
+        }
+      }
+
+      if (role === "max") {
+        const maxVal = toNumberSafe(input.value);
+        if (Number.isFinite(maxVal) && maxVal < 0) {
+          input.classList.add("input-error");
+          input.value = input.dataset.lastValid || "";
+          return;
+        }
+      }
+
+      if (role === "mark") {
+        const row = input.closest('tr[data-row="student"]');
+        updateRowTotal(row, coCols);
+      }
+      if (role === "max") {
+        updateMaxTotal(table, coCols);
       }
     });
 

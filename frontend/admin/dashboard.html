@@ -60,10 +60,6 @@
         <p id="totalFaculty">0</p>
       </div>
       <div class="card">
-        <h3>Total Students</h3>
-        <p id="totalStudents">0</p>
-      </div>
-      <div class="card">
         <h3>Courses Configured</h3>
         <p id="coursesConfigured">0</p>
       </div>
@@ -103,54 +99,81 @@ async function logout() {
 }
 
 /* ---------------------- LOAD DASHBOARD DATA ---------------------- */
-function loadAdminDashboard() {
-    // Admin logic differs: use separate localStorage keys from Faculty modules
-    const courses = JSON.parse(localStorage.getItem("admin_courses")) || [];
-    const faculty = JSON.parse(localStorage.getItem("admin_faculty")) || [];
-    const assignments = JSON.parse(localStorage.getItem("admin_assignments")) || [];
+const API_BASE = "http://localhost:5000/api";
 
-    const totalStudents = Number(localStorage.getItem("admin_total_students")) || 120;
+async function loadAdminDashboard() {
+  const tbody = document.getElementById("adminSummaryBody");
+  tbody.innerHTML = "";
+
+  try {
+    const [coursesResponse, facultyResponse, assignmentsResponse] = await Promise.all([
+      fetch(`${API_BASE}/courses`, { credentials: "include" }),
+      fetch(`${API_BASE}/faculty`, { credentials: "include" }),
+      fetch(`${API_BASE}/assignments`, { credentials: "include" })
+    ]);
+
+    const coursesResult = await coursesResponse.json().catch(() => ({}));
+    const facultyResult = await facultyResponse.json().catch(() => ({}));
+    const assignmentsResult = await assignmentsResponse.json().catch(() => ({}));
+
+    if (!coursesResponse.ok || coursesResult.success === false) {
+      throw new Error(coursesResult.message || "Failed to load courses");
+    }
+    if (!facultyResponse.ok || facultyResult.success === false) {
+      throw new Error(facultyResult.message || "Failed to load faculty");
+    }
+    if (!assignmentsResponse.ok || assignmentsResult.success === false) {
+      throw new Error(assignmentsResult.message || "Failed to load assignments");
+    }
+
+    const courses = coursesResult.courses || [];
+    const faculty = facultyResult.faculty || [];
+    const assignments = assignmentsResult.assignments || [];
 
     document.getElementById("totalCourses").innerText = courses.length;
     document.getElementById("totalFaculty").innerText = faculty.length;
-    document.getElementById("totalStudents").innerText = totalStudents;
 
     const assignmentMap = {};
-    assignments.forEach(a => { assignmentMap[a.courseCode] = a; });
+    assignments.forEach((a) => {
+      const key = a.course_id ?? a.course_code;
+      if (key != null) assignmentMap[String(key)] = a;
+    });
 
-    const configuredCount = courses.filter(c => {
-        const assigned = assignmentMap[c.courseCode];
-        const hasPassing = c.passingMarks !== undefined && c.passingMarks !== "";
-        return Boolean(assigned) && hasPassing;
+    const configuredCount = courses.filter((c) => {
+      const key = c.course_id ?? c.course_code;
+      const assigned = assignmentMap[String(key)];
+      const hasPassing = c.passing_marks !== undefined && c.passing_marks !== "";
+      return Boolean(assigned) && hasPassing;
     }).length;
 
     document.getElementById("coursesConfigured").innerText = configuredCount;
 
-    const tbody = document.getElementById("adminSummaryBody");
-    tbody.innerHTML = "";
-
     if (!courses.length) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No courses added yet.</td></tr>`;
-        return;
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No courses added yet.</td></tr>`;
+      return;
     }
 
-    courses.forEach(c => {
-        const assigned = assignmentMap[c.courseCode];
-        const facultyName = assigned ? assigned.facultyName : "Not assigned";
-        const passing = c.passingMarks !== undefined && c.passingMarks !== "" ? c.passingMarks : "Not set";
-        const status = assigned && passing !== "Not set" ? "Configured" : "Pending";
+    courses.forEach((c) => {
+      const key = c.course_id ?? c.course_code;
+      const assigned = assignmentMap[String(key)];
+      const facultyName = assigned ? assigned.faculty_name : "Not assigned";
+      const passing = c.passing_marks !== undefined && c.passing_marks !== "" ? c.passing_marks : "Not set";
+      const status = assigned && passing !== "Not set" ? "Configured" : "Pending";
 
-        const row = `
-          <tr>
-            <td>${c.courseCode}</td>
-            <td>${c.courseName}</td>
-            <td>${facultyName}</td>
-            <td>${passing}</td>
-            <td>${status}</td>
-          </tr>
-        `;
-        tbody.innerHTML += row;
+      const row = `
+        <tr>
+          <td>${c.course_code}</td>
+          <td>${c.course_name}</td>
+          <td>${facultyName}</td>
+          <td>${passing}</td>
+          <td>${status}</td>
+        </tr>
+      `;
+      tbody.innerHTML += row;
     });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${err.message || "Failed to load dashboard"}</td></tr>`;
+  }
 }
 
 loadAdminDashboard();

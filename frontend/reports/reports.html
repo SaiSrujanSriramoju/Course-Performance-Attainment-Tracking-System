@@ -161,6 +161,44 @@
       margin-top: 8px;
     }
 
+    .dropdown {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .dropdown-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      min-width: 180px;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 6px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+      display: none;
+      z-index: 20;
+    }
+
+    .dropdown-menu.open {
+      display: block;
+    }
+
+    .dropdown-item {
+      width: 100%;
+      border: none;
+      background: #fff;
+      text-align: left;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      cursor: pointer;
+    }
+
+    .dropdown-item:hover {
+      background: #f5f5f5;
+    }
+
     .btn {
       border: none;
       border-radius: 999px;
@@ -1014,7 +1052,13 @@
             <button class="btn btn-outline" data-idx="${idx}" data-role="minor3-btn">Upload Minor 3 Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="major-btn">Upload Major Excel</button>
             <button class="btn btn-outline" data-idx="${idx}" data-role="view-last-btn">View Last Report</button>
-            <button class="btn btn-green" data-idx="${idx}" data-role="final-map-btn">Final Mapping</button>
+            <div class="dropdown">
+              <button class="btn btn-green" data-idx="${idx}" data-role="final-map-toggle" aria-haspopup="true" aria-expanded="false">Final Mapping: Theory v</button>
+              <div class="dropdown-menu" data-idx="${idx}" data-role="final-map-menu">
+                <button class="dropdown-item" data-idx="${idx}" data-mode="theory" data-role="final-map-option">Theory</button>
+                <button class="dropdown-item" data-idx="${idx}" data-mode="lab" data-role="final-map-option">Lab</button>
+              </div>
+            </div>
           </div>
           <div class="marks-entry" data-idx="${idx}">
             <div class="marks-entry-toolbar">
@@ -1054,6 +1098,7 @@
         coursesArea.appendChild(card);
 
         loadCoPoSection(c, idx);
+        updateFinalMappingButtonLabel(idx, loadFinalMappingMode(c, idx));
       });
     }
 
@@ -1079,8 +1124,11 @@
         handleMinorUploadClick(idx, 'minor3');
       } else if (role === "major-btn") {
         handleMinorUploadClick(idx, 'major');
-      } else if (role === "final-map-btn") {
-        generateFinalAttainmentMapping(idx);
+      } else if (role === "final-map-toggle") {
+        toggleFinalMappingMenu(idx, btn);
+      } else if (role === "final-map-option") {
+        const mode = btn.dataset.mode || "theory";
+        applyFinalMappingMode(idx, mode);
       } else if (role === "view-last-btn") {
         handleViewLastReport(idx);
       } else if (role === "download-pdf") {
@@ -1191,6 +1239,12 @@
       }
       if (role === "max") {
         updateMaxTotal(table, coCols);
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".dropdown")) {
+        closeAllFinalMappingMenus();
       }
     });
 
@@ -2359,6 +2413,83 @@
     // Attainment modal removed: attainment levels must be configured in Courses module.
 
     const FINAL_MAPPING_DEBUG_VERSION = "final-mapping-v2026-03-09-1";
+    const FINAL_MAPPING_WEIGHTS = {
+      theory: { internal: 0.4, external: 0.6 },
+      lab: { internal: 0.6, external: 0.4 }
+    };
+
+    function normalizeFinalMappingMode(mode) {
+      return mode === "lab" ? "lab" : "theory";
+    }
+
+    function getFinalMappingModeLabel(mode) {
+      return normalizeFinalMappingMode(mode) === "lab" ? "Lab" : "Theory";
+    }
+
+    function getFinalMappingWeights(mode) {
+      return FINAL_MAPPING_WEIGHTS[normalizeFinalMappingMode(mode)];
+    }
+
+    function computeDirectLevel(internal, external, mode) {
+      const weights = getFinalMappingWeights(mode);
+      return Number(((internal * weights.internal) + (external * weights.external)).toFixed(2));
+    }
+
+    function getFinalMappingFormulaText(mode) {
+      const weights = getFinalMappingWeights(mode);
+      return `Direct = Internal*${weights.internal} + External*${weights.external} (rounded to 2 decimals)`;
+    }
+
+    function getFinalMappingStorageKey(courseId, idx) {
+      return courseId ? `final_mapping_mode_${courseId}` : `final_mapping_mode_idx_${idx}`;
+    }
+
+    function loadFinalMappingMode(course, idx) {
+      const key = getFinalMappingStorageKey(course && course.courseId, idx);
+      const saved = localStorage.getItem(key);
+      return normalizeFinalMappingMode(saved);
+    }
+
+    function saveFinalMappingMode(course, idx, mode) {
+      const key = getFinalMappingStorageKey(course && course.courseId, idx);
+      localStorage.setItem(key, normalizeFinalMappingMode(mode));
+    }
+
+    function updateFinalMappingButtonLabel(idx, mode) {
+      const btn = coursesArea.querySelector(`button[data-role="final-map-toggle"][data-idx="${idx}"]`);
+      if (!btn) return;
+      btn.textContent = `Final Mapping: ${getFinalMappingModeLabel(mode)} v`;
+    }
+
+    function closeAllFinalMappingMenus() {
+      const menus = coursesArea.querySelectorAll('.dropdown-menu[data-role="final-map-menu"]');
+      menus.forEach((menu) => {
+        menu.classList.remove('open');
+        const idx = menu.dataset.idx;
+        const toggle = coursesArea.querySelector(`button[data-role="final-map-toggle"][data-idx="${idx}"]`);
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    function toggleFinalMappingMenu(idx, toggleBtn) {
+      const menu = coursesArea.querySelector(`.dropdown-menu[data-role="final-map-menu"][data-idx="${idx}"]`);
+      if (!menu) return;
+      const isOpen = menu.classList.contains('open');
+      closeAllFinalMappingMenus();
+      if (!isOpen) {
+        menu.classList.add('open');
+        if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
+      }
+    }
+
+    function applyFinalMappingMode(idx, mode) {
+      const course = (loadCourses() || [])[idx];
+      const normalized = normalizeFinalMappingMode(mode);
+      saveFinalMappingMode(course, idx, normalized);
+      updateFinalMappingButtonLabel(idx, normalized);
+      closeAllFinalMappingMenus();
+      generateFinalAttainmentMapping(idx, normalized);
+    }
 
     function loadFinalMappingMeta(courseId) {
       const empty = { targets: {}, remarks: {} };
@@ -2390,7 +2521,7 @@
       return attained >= target ? 'MET' : 'NotMet';
     }
 
-    function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo) {
+    function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo, mode) {
       let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div><div class="section-separator"></div></div>`;
       html += `<h4>Final Attainment Level Mapping</h4>`;
       html += `<table style="width:100%;border-collapse:collapse"><thead><tr>` +
@@ -2405,7 +2536,7 @@
       const avgInternal = internalVals.length ? Number((internalVals.reduce((a, b) => a + b, 0) / internalVals.length).toFixed(2)) : null;
       const avgExternal = externalVals.length ? Number((externalVals.reduce((a, b) => a + b, 0) / externalVals.length).toFixed(2)) : null;
       const avgDirect = (Number.isFinite(avgInternal) && Number.isFinite(avgExternal))
-        ? Number(((avgInternal * 0.4) + (avgExternal * 0.6)).toFixed(2))
+        ? computeDirectLevel(avgInternal, avgExternal, mode)
         : null;
 
       for (const r of rows) {
@@ -2423,11 +2554,11 @@
         `<td style="text-align:center;padding:6px;font-weight:600;">${Number.isFinite(avgDirect) ? avgDirect : ''}</td>` +
       `</tr>`;
       html += `</tbody></table>`;
-      html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Direct = Internal*0.4 + External*0.6 (rounded to 2 decimals)</div>`;
+      html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">${getFinalMappingFormulaText(mode)}</div>`;
       return html;
     }
 
-    function buildRemarksTableHtml(courseName, courseCodeDisplay, rows) {
+    function buildRemarksTableHtml(courseName, courseCodeDisplay, rows, mode) {
       let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div>` +
         `<div style="font-size:0.9rem;margin-top:4px;">Course Code : ${escapeHtml(courseCodeDisplay || "")}</div>` +
         `<div class="section-separator"></div></div>`;
@@ -2460,7 +2591,7 @@
         `</tr>`;
       });
       html += `</tbody></table>`;
-      html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Attained Level is from the final mapping (Direct = Internal*0.4 + External*0.6, rounded to 2 decimals).</div>`;
+      html += `<div style="margin-top:10px;font-size:0.86rem;color:#444">Attained Level is from the final mapping (${getFinalMappingFormulaText(mode)}).</div>`;
       return html;
     }
 
@@ -2624,13 +2755,16 @@
 
     // ========= FINAL ATTAINMENT MAPPING =========
     // Compute final mapping using minors (internal) and major (external)
-    async function generateFinalAttainmentMapping(idx) {
+    async function generateFinalAttainmentMapping(idx, modeOverride) {
       activeCourseIndex = idx;
       const course = (loadCourses() || [])[idx];
       if (!course || !course.courseId) {
         alert('Course not found');
         return;
       }
+
+      const mode = normalizeFinalMappingMode(modeOverride || loadFinalMappingMode(course, idx));
+      updateFinalMappingButtonLabel(idx, mode);
 
       const courseName = course.name || 'Course';
 
@@ -2682,7 +2816,7 @@
           const internal = internalByCo[co];
           const external = externalByCo[co];
           const direct = (Number.isFinite(internal) && Number.isFinite(external))
-            ? Number(((internal * 0.4) + (external * 0.6)).toFixed(2))
+            ? computeDirectLevel(internal, external, mode)
             : null;
           return {
             co: `CO-${co}`,
@@ -2737,7 +2871,7 @@
             const internal = Number.isFinite(localInternal[coNum]) ? localInternal[coNum] : r.internal;
             const external = Number.isFinite(localExternal[coNum]) ? localExternal[coNum] : r.external;
             const direct = (Number.isFinite(internal) && Number.isFinite(external))
-              ? Number(((internal * 0.4) + (external * 0.6)).toFixed(2))
+              ? computeDirectLevel(internal, external, mode)
               : r.direct;
             return {
               co: r.co || (Number.isFinite(coNum) ? `CO-${coNum}` : ''),
@@ -2753,7 +2887,9 @@
           const coLabel = r.co || (Number.isFinite(Number(r.co_number)) ? `CO${Number(r.co_number)}` : '');
           const internal = Number(r.internal ?? r.internalLevel);
           const external = Number(r.external ?? r.externalLevel);
-          const direct = Number(r.direct);
+          const direct = (Number.isFinite(internal) && Number.isFinite(external))
+            ? computeDirectLevel(internal, external, mode)
+            : Number(r.direct);
           return {
             co: coLabel,
             internalLevel: Number.isFinite(internal) ? internal : null,
@@ -2810,13 +2946,13 @@
         const debugInfo = `Debug localData=${localData ? 'yes' : 'no'} | CO-4 local internal=${li[4]} external=${le[4]} | backend internal=${b4?.internal} external=${b4?.external}` +
                           `; CO-6 local internal=${li[6]} external=${le[6]} | backend internal=${b6?.internal} external=${b6?.external}`;
 
-        const finalHtml = buildFinalMappingHtml(courseName, courseCodeDisplay, normalized, "");
+        const finalHtml = buildFinalMappingHtml(courseName, courseCodeDisplay, normalized, "", mode);
         const mappingContainer = document.getElementById(`final-mapping-${idx}`);
         if (mappingContainer) {
           mappingContainer.innerHTML = finalHtml;
         }
 
-        const remarksHtml = buildRemarksTableHtml(courseName, courseCodeDisplay, enriched);
+        const remarksHtml = buildRemarksTableHtml(courseName, courseCodeDisplay, enriched, mode);
         const remarksContainer = document.getElementById(`remarks-table-${idx}`);
         if (remarksContainer) {
           remarksContainer.innerHTML = remarksHtml;
@@ -2842,7 +2978,7 @@
         }
 
         lastPayload = lastPayload || {};
-        lastPayload.finalMapping = { courseName, batch: course.batch || '', rows: normalized };
+        lastPayload.finalMapping = { courseName, batch: course.batch || '', rows: normalized, mode };
         try {
           const wb = buildFinalMappingWorkbook(lastPayload.finalMapping);
           lastPayload.finalMapping.wb = wb.wb;
@@ -2869,7 +3005,7 @@
       const avgInternal = internalVals.length ? Number((internalVals.reduce((a, b) => a + b, 0) / internalVals.length).toFixed(2)) : '';
       const avgExternal = externalVals.length ? Number((externalVals.reduce((a, b) => a + b, 0) / externalVals.length).toFixed(2)) : '';
       const avgDirect = (Number.isFinite(avgInternal) && Number.isFinite(avgExternal))
-        ? Number(((avgInternal * 0.4) + (avgExternal * 0.6)).toFixed(2))
+        ? computeDirectLevel(avgInternal, avgExternal, mapping.mode)
         : '';
       rows.push(['Total', avgInternal, avgExternal, avgDirect]);
       const wb = XLSX.utils.book_new();

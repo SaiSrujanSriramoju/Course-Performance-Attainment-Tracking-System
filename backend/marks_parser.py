@@ -4,9 +4,11 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 
+# Canonical column name used to identify student roll numbers.
 ROLL_COL = "Roll No"
 
 
+# Find the first row that looks like a header with the Roll No column.
 def _find_header_row(df: pd.DataFrame) -> int:
     max_scan = min(10, len(df))
     for i in range(max_scan):
@@ -16,6 +18,7 @@ def _find_header_row(df: pd.DataFrame) -> int:
     return -1
 
 
+# Normalize a CO column label and extract its number.
 def _normalize_co_col(name: str) -> Tuple[bool, int]:
     if not name:
         return False, -1
@@ -28,6 +31,7 @@ def _normalize_co_col(name: str) -> Tuple[bool, int]:
     return True, int(match.group(1))
 
 
+# Convert raw marks to a numeric value (AB treated as zero).
 def _to_number(value) -> float:
     if pd.isna(value):
         return float("nan")
@@ -40,6 +44,7 @@ def _to_number(value) -> float:
         return float("nan")
 
 
+# Parse marks Excel into max marks and per-student scores.
 def parse_marks_excel(file_path: str) -> Dict[str, object]:
     try:
         raw = pd.read_excel(file_path, header=None, engine="openpyxl")

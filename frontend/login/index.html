@@ -9,7 +9,7 @@
 
 <body>
 
-  <!-- Transparent top bar -->
+  <!-- Transparent top bar with branding -->
   <div class="navbar">
     <div class="nav-left">
       <img src="/faculty/uoh_logo.png" alt="University of Hyderabad Logo" class="nav-logo">
@@ -17,7 +17,7 @@
     </div>
   </div>
 
-  <!-- Faculty Login Card -->
+  <!-- Faculty login card and form -->
   <div class="login-card">
     <img src="/faculty/uoh_logo.png" alt="University Logo" class="logo">
     <h2>Faculty Login Portal</h2>
@@ -29,7 +29,7 @@
       <button type="submit">Login</button>
     </form>
 
-    <!-- Error message -->
+    <!-- Error message shown on failed login -->
     <p id="loginError" style="color: #ffdddd; background:#b40000; display:none; padding:6px; border-radius:6px; margin-top:10px;">
       Invalid User ID or Password
     </p>
@@ -44,7 +44,7 @@
     © 2025 University of Hyderabad | All Rights Reserved
   </footer>
 
-  <!-- Login JS -->
+  <!-- Login JS: enforce base URL and call the API -->
     <script>
         if (window.location.port !== "5000") {
           window.location.href = "http://localhost:5000/login";

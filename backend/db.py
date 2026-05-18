@@ -2,11 +2,14 @@ import mysql.connector
 
 from config import DB_CONFIG
 
+# Create a database connection using the configured credentials.
+
 
 def get_db_connection():
     return mysql.connector.connect(**DB_CONFIG)
 
 
+# Initialize required tables and seed a default admin account.
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()

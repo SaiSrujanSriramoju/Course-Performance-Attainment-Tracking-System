@@ -13,21 +13,26 @@ import pandas as pd
 
 from db import get_db_connection, init_db
 
+# Flask API and UI server for the course outcome system.
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-secret-key")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+# Allow the frontend pages to call the API during local development.
 CORS(
     app,
     resources={r"/api/*": {"origins": ["http://127.0.0.1:5500", "http://localhost:5500"]}},
     supports_credentials=True,
 )
 
+# File upload settings for syllabus files.
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "..", "uploads", "syllabus")
 ALLOWED_SYLLABUS_EXTENSIONS = {".pdf", ".doc", ".docx"}
 MAX_SYLLABUS_SIZE_BYTES = 5 * 1024 * 1024
 
+# Frontend UI directories for static page serving.
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 ADMIN_UI_DIR = os.path.join(FRONTEND_DIR, "admin")
@@ -39,11 +44,13 @@ REPORTS_UI_DIR = os.path.join(FRONTEND_DIR, "reports")
 app.config["MAX_CONTENT_LENGTH"] = MAX_SYLLABUS_SIZE_BYTES
 
 
+# Check if the syllabus file has an allowed extension.
 def allowed_syllabus_file(filename):
     _, ext = os.path.splitext(filename)
     return ext.lower() in ALLOWED_SYLLABUS_EXTENSIONS
 
 
+# Clean PDF table cell values into a consistent string.
 def _normalize_pdf_cell(value):
     if value is None:
         return ""
@@ -51,6 +58,7 @@ def _normalize_pdf_cell(value):
     return re.sub(r"\s+", " ", text)
 
 
+# Extract a PO number from a cell label.
 def _parse_po_number(label):
     if not label:
         return None
@@ -60,6 +68,7 @@ def _parse_po_number(label):
     return int(match.group(1))
 
 
+# Extract a CO number from a cell label.
 def _parse_co_number(label):
     if not label:
         return None
@@ -69,6 +78,7 @@ def _parse_co_number(label):
     return int(match.group(1))
 
 
+# Find all CO numbers mentioned inside a block of text.
 def _extract_co_numbers_from_text(text):
     if not text:
         return []
@@ -83,6 +93,7 @@ def _extract_co_numbers_from_text(text):
     return values
 
 
+# Parse the CO-PO matrix from a syllabus PDF (first usable table only).
 def parse_co_po_matrix_from_pdf(file_path):
     try:
         import pdfplumber
@@ -146,6 +157,7 @@ def parse_co_po_matrix_from_pdf(file_path):
     return {"po_numbers": po_numbers, "matrix": matrix}
 
 
+# Count the highest CO number found in a PDF syllabus.
 def extract_co_count_from_pdf(file_path):
     try:
         import pdfplumber
@@ -162,6 +174,7 @@ def extract_co_count_from_pdf(file_path):
     return max(co_numbers)
 
 
+# Count the highest CO number found in a DOCX syllabus.
 def extract_co_count_from_docx(file_path):
     try:
         import docx
@@ -181,6 +194,7 @@ def extract_co_count_from_docx(file_path):
     return max(co_numbers)
 
 
+# Count the highest CO number found in a DOC syllabus.
 def extract_co_count_from_doc(file_path):
     try:
         import textract
@@ -199,6 +213,7 @@ def extract_co_count_from_doc(file_path):
     return max(co_numbers)
 
 
+# Pick the right parser based on the syllabus file extension.
 def extract_co_count_from_syllabus_path(file_path):
     if not file_path or not os.path.isfile(file_path):
         return None
@@ -214,6 +229,7 @@ def extract_co_count_from_syllabus_path(file_path):
     return None
 
 
+# Store a parsed CO-PO matrix into the database.
 def save_co_po_matrix(course_id, parsed):
     if not parsed:
         return False
@@ -244,10 +260,12 @@ def save_co_po_matrix(course_id, parsed):
         conn.close()
 
 
+# Unified JSON response helper.
 def json_response(payload, status=200):
     return jsonify(payload), status
 
 
+# Safely read JSON from the request body.
 def get_request_json():
     data = request.get_json(silent=True)
     if data is None:
@@ -255,6 +273,7 @@ def get_request_json():
     return data, None
 
 
+# Require a logged-in user (any role).
 def login_required(handler):
     @wraps(handler)
     def wrapper(*args, **kwargs):
@@ -265,6 +284,7 @@ def login_required(handler):
     return wrapper
 
 
+# Require a specific user role.
 def role_required(role):
     def decorator(handler):
         @wraps(handler)
@@ -280,6 +300,7 @@ def role_required(role):
     return decorator
 
 
+# Check if a faculty member is assigned to a course.
 def faculty_assigned_to_course(course_id, faculty_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -294,6 +315,7 @@ def faculty_assigned_to_course(course_id, faculty_id):
         conn.close()
 
 
+# Determine CO numbers for a course from the most reliable source.
 def get_course_co_numbers(course_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -322,6 +344,7 @@ def get_course_co_numbers(course_id):
         conn.close()
 
 
+# Fetch saved attainment values for a specific exam table.
 def fetch_attainment_by_co(cursor, table_name, course_id, co_numbers):
     allowed_tables = {
         "minor1_attainment",
@@ -346,6 +369,7 @@ def fetch_attainment_by_co(cursor, table_name, course_id, co_numbers):
     return {int(row["co_number"]): row.get("attainment") for row in rows}
 
 
+# Map exam type labels to their database table names.
 def get_exam_table(exam_type):
     mapping = {
         "minor1": "minor1_attainment",
@@ -356,6 +380,7 @@ def get_exam_table(exam_type):
     return mapping.get(str(exam_type).lower())
 
 
+# Map exam types to the CO columns they use in Excel exports.
 def get_exam_co_columns(exam_type):
     mapping = {
         "minor1": [1, 2],
@@ -366,6 +391,7 @@ def get_exam_co_columns(exam_type):
     return mapping.get(str(exam_type).strip().lower())
 
 
+# Extract a CO value from a flexible key/value payload.
 def extract_co_value(data, co_number):
     if not isinstance(data, dict):
         return None
@@ -383,6 +409,7 @@ def extract_co_value(data, co_number):
     return None
 
 
+# Normalize marks (including AB and blanks) into a consistent cell value.
 def normalize_mark_cell(value):
     if value is None:
         return ""
@@ -400,6 +427,7 @@ def normalize_mark_cell(value):
     return int(number) if number.is_integer() else number
 
 
+# Export marks data to an Excel file (faculty only).
 @app.route("/api/export_excel", methods=["POST"])
 @role_required("faculty")
 def export_marks_excel():
@@ -474,6 +502,7 @@ def export_marks_excel():
     )
 
 
+# Load saved attainment level ranges for a course and faculty member.
 def load_attainment_ranges(course_id, faculty_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -495,6 +524,7 @@ def load_attainment_ranges(course_id, faculty_id):
         conn.close()
 
 
+# Validate that attainment ranges are continuous and within 0-100.
 def validate_attainment_ranges(ranges):
     grouped = {}
     for entry in ranges:
@@ -543,6 +573,7 @@ def validate_attainment_ranges(ranges):
     return True, None
 
 
+# Compute attainment percentage and level per CO using thresholds.
 def compute_attainment_values(course_id, faculty_id):
     co_numbers = get_course_co_numbers(course_id)
     ranges = load_attainment_ranges(course_id, faculty_id)
@@ -597,6 +628,7 @@ def compute_attainment_values(course_id, faculty_id):
         conn.close()
 
 
+# Save per-CO threshold marks (creates CO rows if missing).
 def save_co_thresholds(course_id, thresholds):
     if not thresholds:
         return
@@ -639,6 +671,7 @@ def save_co_thresholds(course_id, thresholds):
         conn.close()
 
 
+# Unified login for admin and faculty.
 @app.route("/api/login", methods=["POST"])
 def login():
     data, error = get_request_json()
@@ -682,6 +715,7 @@ def login():
         conn.close()
 
 
+# Check current session role.
 @app.route("/api/session", methods=["GET"])
 def session_status():
     role = session.get("role")
@@ -696,12 +730,14 @@ def session_status():
     return json_response(payload)
 
 
+# Clear the session and log out.
 @app.route("/api/logout", methods=["POST"])
 def logout():
     session.clear()
     return json_response({"success": True})
 
 
+# Admin-only login endpoint.
 @app.route("/api/login/admin", methods=["POST"])
 def login_admin():
     data, error = get_request_json()
@@ -732,6 +768,7 @@ def login_admin():
         conn.close()
 
 
+# Faculty-only login endpoint.
 @app.route("/api/login/faculty", methods=["POST"])
 def login_faculty():
     data, error = get_request_json()
@@ -763,6 +800,7 @@ def login_faculty():
         conn.close()
 
 
+# Change password for the current session role.
 @app.route("/api/change-password", methods=["POST"])
 @login_required
 def change_password():
@@ -812,6 +850,7 @@ def change_password():
         conn.close()
 
 
+# Create a faculty account (admin only).
 @app.route("/api/faculty", methods=["POST"])
 @role_required("admin")
 def create_faculty():
@@ -845,6 +884,7 @@ def create_faculty():
         conn.close()
 
 
+# List faculty accounts (admin only).
 @app.route("/api/faculty", methods=["GET"])
 @role_required("admin")
 def list_faculty():
@@ -859,6 +899,7 @@ def list_faculty():
         conn.close()
 
 
+# Update faculty profile details (admin only).
 @app.route("/api/faculty/<faculty_id>", methods=["PUT"])
 @role_required("admin")
 def update_faculty(faculty_id):
@@ -888,6 +929,7 @@ def update_faculty(faculty_id):
         conn.close()
 
 
+# Delete a faculty account (admin only).
 @app.route("/api/faculty/<faculty_id>", methods=["DELETE"])
 @role_required("admin")
 def delete_faculty(faculty_id):
@@ -905,6 +947,7 @@ def delete_faculty(faculty_id):
         conn.close()
 
 
+# Create a course and upload its syllabus (admin only).
 @app.route("/api/courses", methods=["POST"])
 @role_required("admin")
 def create_course():
@@ -985,6 +1028,7 @@ def create_course():
         conn.close()
 
 
+# List all courses (admin only).
 @app.route("/api/courses", methods=["GET"])
 @role_required("admin")
 def list_courses():
@@ -1003,11 +1047,13 @@ def list_courses():
         conn.close()
 
 
+# Serve uploaded syllabus files.
 @app.route("/uploads/syllabus/<path:filename>", methods=["GET"])
 def get_syllabus(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 
+# Serve a syllabus to assigned faculty.
 @app.route("/get_syllabus/<int:course_id>", methods=["GET"])
 @role_required("faculty")
 def get_syllabus_for_course(course_id):
@@ -1035,6 +1081,7 @@ def get_syllabus_for_course(course_id):
         conn.close()
 
 
+# Return or infer the number of COs from a syllabus file.
 @app.route("/api/syllabus/<int:course_id>/co-count", methods=["GET"])
 @role_required("faculty")
 def get_syllabus_co_count(course_id):
@@ -1078,6 +1125,7 @@ def get_syllabus_co_count(course_id):
         conn.close()
 
 
+# Update course details (admin only).
 @app.route("/api/courses/<int:course_id>", methods=["PUT"])
 @role_required("admin")
 def update_course(course_id):
@@ -1111,6 +1159,7 @@ def update_course(course_id):
         conn.close()
 
 
+# Delete a course and all related records (admin only).
 @app.route("/api/courses/<int:course_id>", methods=["DELETE"])
 @role_required("admin")
 def delete_course(course_id):
@@ -1150,6 +1199,7 @@ def delete_course(course_id):
         conn.close()
 
 
+# Assign a faculty member to a course (admin only).
 @app.route("/api/assign", methods=["POST"])
 @role_required("admin")
 def assign_faculty():
@@ -1176,6 +1226,7 @@ def assign_faculty():
         conn.close()
 
 
+# List course-faculty assignments (admin only).
 @app.route("/api/assignments", methods=["GET"])
 @role_required("admin")
 def list_assignments():
@@ -1196,6 +1247,7 @@ def list_assignments():
         conn.close()
 
 
+# Remove a course-faculty assignment (admin only).
 @app.route("/api/assignments/<int:assignment_id>", methods=["DELETE"])
 @role_required("admin")
 def delete_assignment(assignment_id):
@@ -1212,6 +1264,7 @@ def delete_assignment(assignment_id):
         conn.close()
 
 
+# List courses assigned to the logged-in faculty.
 @app.route("/api/faculty/courses", methods=["GET"])
 @role_required("faculty")
 def list_faculty_courses():
@@ -1234,6 +1287,7 @@ def list_faculty_courses():
         conn.close()
 
 
+# Get saved CO attainment values for a faculty member.
 @app.route("/api/co_attainment/<int:course_id>", methods=["GET"])
 @role_required("faculty")
 def get_co_attainment(course_id):
@@ -1257,6 +1311,7 @@ def get_co_attainment(course_id):
         conn.close()
 
 
+# Save CO attainment values (faculty only).
 @app.route("/api/save_co_attainment", methods=["POST"])
 @role_required("faculty")
 def save_co_attainment():
@@ -1306,6 +1361,7 @@ def save_co_attainment():
         conn.close()
 
 
+# Save attainment levels and thresholds for a course.
 @app.route("/api/save_attainment_ranges", methods=["POST"])
 @app.route("/save_attainment_ranges", methods=["POST"])
 @role_required("faculty")
@@ -1375,6 +1431,7 @@ def save_attainment_ranges():
         conn.close()
 
 
+# Fetch attainment ranges for UI use.
 @app.route("/api/get_attainment_ranges/<int:course_id>", methods=["GET"])
 @app.route("/get_attainment_ranges/<int:course_id>", methods=["GET"])
 @role_required("faculty")
@@ -1400,6 +1457,7 @@ def get_attainment_ranges(course_id):
         conn.close()
 
 
+# Compute and return direct PO attainment from CO-PO matrix.
 @app.route("/api/co_po_direct/<int:course_id>", methods=["GET"])
 @role_required("faculty")
 def get_co_po_direct(course_id):
@@ -1466,6 +1524,7 @@ def get_co_po_direct(course_id):
         conn.close()
 
 
+# Return CO-PO matrix and column averages.
 @app.route("/api/co_po_matrix/<int:course_id>", methods=["GET"])
 @role_required("faculty")
 def get_co_po_matrix(course_id):
@@ -1512,6 +1571,7 @@ def get_co_po_matrix(course_id):
         conn.close()
 
 
+# Compute final attainment mapping (internal + external).
 @app.route("/api/final_mapping/<int:course_id>", methods=["GET"])
 @role_required("faculty")
 def get_final_mapping(course_id):
@@ -1575,6 +1635,7 @@ def get_final_mapping(course_id):
         conn.close()
 
 
+# Save attainment values for a specific exam type.
 @app.route("/api/save_exam_attainment", methods=["POST"])
 @role_required("faculty")
 def save_exam_attainment():
@@ -1627,56 +1688,67 @@ def save_exam_attainment():
         conn.close()
 
 
+# Serve login UI.
 @app.route("/login", methods=["GET"])
 def login_page():
     return send_from_directory(LOGIN_UI_DIR, "index.html")
 
 
+# Serve login UI assets.
 @app.route("/login/<path:filename>", methods=["GET"])
 def serve_login_assets(filename):
     return send_from_directory(LOGIN_UI_DIR, filename)
 
 
+# Serve admin UI assets.
 @app.route("/admin/<path:filename>", methods=["GET"])
 def serve_admin_assets(filename):
     return send_from_directory(ADMIN_UI_DIR, filename)
 
 
+# Serve admin dashboard page.
 @app.route("/admin/dashboard", methods=["GET"])
 def serve_admin_dashboard():
     return send_from_directory(ADMIN_UI_DIR, "dashboard.html")
 
 
+# Serve faculty UI assets.
 @app.route("/faculty/<path:filename>", methods=["GET"])
 def serve_faculty_assets(filename):
     return send_from_directory(FACULTY_UI_DIR, filename)
 
 
+# Serve faculty dashboard page.
 @app.route("/faculty/dashboard", methods=["GET"])
 def serve_faculty_dashboard():
     return send_from_directory(FACULTY_UI_DIR, "dashboard.html")
 
 
+# Serve course UI assets.
 @app.route("/courses/<path:filename>", methods=["GET"])
 def serve_courses_assets(filename):
     return send_from_directory(COURSES_UI_DIR, filename)
 
 
+# Serve courses page.
 @app.route("/courses", methods=["GET"])
 def serve_courses_page():
     return send_from_directory(COURSES_UI_DIR, "courses.html")
 
 
+# Serve reports UI assets.
 @app.route("/reports/<path:filename>", methods=["GET"])
 def serve_reports_assets(filename):
     return send_from_directory(REPORTS_UI_DIR, filename)
 
 
+# Serve reports page.
 @app.route("/reports", methods=["GET"])
 def serve_reports_page():
     return send_from_directory(REPORTS_UI_DIR, "reports.html")
 
 
+# Create a course outcome entry.
 @app.route("/api/co", methods=["POST"])
 def create_co():
     data, error = get_request_json()
@@ -1701,6 +1773,7 @@ def create_co():
         conn.close()
 
 
+# Create a threshold for a specific CO.
 @app.route("/api/threshold", methods=["POST"])
 def create_threshold():
     data, error = get_request_json()
@@ -1725,6 +1798,7 @@ def create_threshold():
         conn.close()
 
 
+# Fetch course outcomes and thresholds for a course.
 @app.route("/api/co/<int:course_id>", methods=["GET"])
 @role_required("faculty")
 def get_course_outcomes(course_id):
@@ -1748,6 +1822,7 @@ def get_course_outcomes(course_id):
         conn.close()
 
 
+# Compute attainment levels based on thresholds and store them.
 @app.route("/api/calculate-attainment", methods=["POST"])
 def calculate_attainment():
     data, error = get_request_json()
@@ -1818,6 +1893,7 @@ def calculate_attainment():
         conn.close()
 
 
+# Read stored attainment results for a course.
 @app.route("/api/attainment/<int:course_id>", methods=["GET"])
 def get_attainment(course_id):
     conn = get_db_connection()
@@ -1838,6 +1914,7 @@ def get_attainment(course_id):
         conn.close()
 
 
+# Development entrypoint.
 if __name__ == "__main__":
     init_db()
     app.run(host="0.0.0.0", port=5000, debug=True)

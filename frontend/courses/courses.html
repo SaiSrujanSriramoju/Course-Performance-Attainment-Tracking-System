@@ -287,7 +287,7 @@
 </head>
 <body>
 
-<!-- SIDEBAR -->
+<!-- SIDEBAR: faculty navigation -->
 <aside class="sidebar">
     <div class="logo-section">
         <img src="/faculty/uoh_logo.png">
@@ -302,7 +302,7 @@
     </nav>
 </aside>
 
-<!-- MAIN CONTENT -->
+<!-- MAIN CONTENT: assigned courses and attainment ranges -->
 <main class="content">
 
     <h1 class="page-title">Course Management</h1>
@@ -313,7 +313,7 @@
 
 </main>
 
-<!-- ADD/EDIT MODAL -->
+<!-- ADD/EDIT MODAL (disabled; admin manages courses) -->
 <div id="courseModal" class="modal">
     <div class="modal-content">
         <h3 id="modalTitle">Add Course</h3>
@@ -349,6 +349,7 @@
     </div>
 </div>
 
+<!-- Syllabus preview modal -->
 <div id="syllabusModal" class="syllabus-modal">
     <div class="syllabus-modal-content">
         <div class="syllabus-modal-header">
@@ -364,9 +365,10 @@
 
 <!-- JAVASCRIPT (FULL LOGIC) -->
 <script>
-
+// API base for course and attainment endpoints.
 const API_BASE = "http://localhost:5000/api";
 
+// End the session and return to login.
 async function logout() {
     try {
         await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
@@ -375,14 +377,17 @@ async function logout() {
     }
 }
 
+// Local course cache used for UI rendering.
 let courses = [];
 let editingIndex = -1;
 
+// Persist courses to localStorage and refresh the list.
 function saveCourses() {
     localStorage.setItem("courses", JSON.stringify(courses));
     renderCourses();
 }
 
+// Render the course cards and fetch attainment ranges per course.
 function renderCourses() {
     const list = document.getElementById("coursesList");
     list.innerHTML = "";
@@ -425,20 +430,24 @@ function renderCourses() {
     });
 }
 
+// Faculty cannot create courses in this UI.
 document.getElementById("addCourseBtn").onclick = () => {
     alert("Courses are managed by Admin. Assigned courses appear here automatically.");
 };
 
+// Show the modal (not used for faculty-managed courses).
 function openModal() {
     // build level rows for modal (defaults)
     buildCourseLevelRows();
     document.getElementById("courseModal").style.display = "flex";
 }
 
+// Close the modal.
 function closeModal() {
     document.getElementById("courseModal").style.display = "none";
 }
 
+// Save course data into localStorage (not used for faculty).
 document.getElementById("saveCourse").onclick = () => {
     const name = courseName.value.trim();
     const batch = courseBatch.value;
@@ -483,14 +492,17 @@ document.getElementById("saveCourse").onclick = () => {
     closeModal();
 };
 
+// Courses are managed by admin; faculty can only view.
 function editCourse(i) {
     alert("Courses are managed by Admin. You can view assigned courses here.");
 }
 
+// Courses are managed by admin; faculty can only view.
 function deleteCourse(i) {
     alert("Courses are managed by Admin. You can view assigned courses here.");
 }
 
+// Load saved attainment ranges and thresholds for each CO.
 async function loadAttainmentRanges(course, index) {
     const container = document.getElementById(`co-ranges-${index}`);
     if (!container) return;
@@ -550,6 +562,7 @@ async function loadAttainmentRanges(course, index) {
     }
 }
 
+// Render the input table for one CO's attainment levels.
 function renderCoRangeBlock(courseIndex, coNumber, levelCount, existing, thresholdMark) {
     const rows = [];
     for (let level = 1; level <= levelCount; level += 1) {
@@ -597,6 +610,7 @@ function renderCoRangeBlock(courseIndex, coNumber, levelCount, existing, thresho
     `;
 }
 
+// Bind auto-updating lower bounds when upper bounds change.
 function bindRangeEvents(courseIndex, coNumber) {
     const block = document.querySelector(`.co-range-block[data-course-index="${courseIndex}"][data-co-number="${coNumber}"]`);
     if (!block) return;
@@ -607,6 +621,7 @@ function bindRangeEvents(courseIndex, coNumber) {
     updateAutoLower(block);
 }
 
+// Auto-fill the next lower limit to keep ranges continuous.
 function updateAutoLower(block) {
     const upperInputs = Array.from(block.querySelectorAll('input[data-field="upper"]'));
     const lowerInputs = Array.from(block.querySelectorAll('input[data-field="lower"]'));
@@ -621,6 +636,7 @@ function updateAutoLower(block) {
     }
 }
 
+// Rebuild the levels table when the user changes level count.
 function regenerateCoLevels(courseIndex, coNumber) {
     const container = document.getElementById(`co-ranges-${courseIndex}`);
     if (!container) return;
@@ -638,6 +654,7 @@ function regenerateCoLevels(courseIndex, coNumber) {
     }
 }
 
+// Validate range inputs before saving.
 function validateRangesForCourse(courseIndex) {
     const container = document.getElementById(`co-ranges-${courseIndex}`);
     const errorEl = document.getElementById(`co-range-error-${courseIndex}`);
@@ -681,6 +698,7 @@ function validateRangesForCourse(courseIndex) {
     return { valid: true };
 }
 
+// Save attainment ranges and thresholds to the backend.
 async function saveAttainmentRanges(index) {
     const course = courses[index];
     const container = document.getElementById(`co-ranges-${index}`);
@@ -739,6 +757,7 @@ async function saveAttainmentRanges(index) {
     }
 }
 
+// Open the syllabus viewer for the selected course.
 function openSyllabusModal(index) {
     const course = courses[index];
     const modal = document.getElementById("syllabusModal");
@@ -759,6 +778,7 @@ function openSyllabusModal(index) {
     modal.classList.add("open");
 }
 
+// Close the syllabus viewer.
 function closeSyllabusModal() {
     const modal = document.getElementById("syllabusModal");
     const frame = document.getElementById("syllabusFrame");
@@ -768,6 +788,7 @@ function closeSyllabusModal() {
 
 // Build level definition rows inside the modal. If `prefill` is provided,
 // it should be an array of {level,low,high} objects to populate the inputs.
+// Build rows for the modal-based level editor (unused by faculty).
 function buildCourseLevelRows(prefill) {
     const container = document.getElementById('levelsDef');
     container.innerHTML = '';
@@ -788,6 +809,7 @@ document.getElementById('levelsCount').addEventListener('change', () => buildCou
 
 // CO-PO upload removed: function removed from UI to simplify workflow
 
+// Fetch courses assigned to the logged-in faculty.
 async function fetchAssignedCourses() {
     const response = await fetch(`${API_BASE}/faculty/courses`, { credentials: "include" });
     const result = await response.json().catch(() => ({}));

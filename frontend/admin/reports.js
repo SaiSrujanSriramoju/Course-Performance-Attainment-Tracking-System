@@ -1,6 +1,7 @@
 /* ---------------------- ADMIN REPORTS ---------------------- */
 const API_BASE = "http://localhost:5000/api";
 
+// Fetch courses and assignments for the admin summary view.
 async function loadAdminData() {
   const [coursesResponse, assignmentsResponse] = await Promise.all([
     fetch(`${API_BASE}/courses`, { credentials: "include" }),
@@ -26,6 +27,7 @@ async function loadAdminData() {
   return { courses, assignmentMap };
 }
 
+// Render report cards with course configuration status.
 async function renderAdminReports() {
   const container = document.getElementById("reportCards");
   if (!container) return;
@@ -75,6 +77,7 @@ async function renderAdminReports() {
   }
 }
 
+// End session and return to login page.
 async function logout() {
   try {
     await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });

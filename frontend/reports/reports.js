@@ -78,6 +78,7 @@ function toNumberSafe(v) {
 const coursesArea = document.getElementById("coursesArea");
 const excelInput = document.getElementById("excelInput");
 
+// Apply attainment levels from backend ranges and update the report view.
 async function applyBackendAttainment(payload, courseId) {
   try {
     payload.attainment = payload.attainment || {};
@@ -178,6 +179,7 @@ async function applyBackendAttainment(payload, courseId) {
   }
 }
 
+// Apply threshold marks from the backend for each CO.
 async function applyBackendThresholds(payload, courseId) {
   try {
     payload.thresholdsRefreshing = true;
@@ -209,6 +211,7 @@ async function applyBackendThresholds(payload, courseId) {
   }
 }
 
+// Render course cards and attach actions for uploads and reports.
 function renderCourses() {
   if (!courses.length) {
     courses = loadCourses();
@@ -290,6 +293,7 @@ coursesArea.addEventListener("click", (e) => {
   }
 });
 
+// Load the assigned courses from the backend and cache them locally.
 async function fetchAssignedCourses() {
   const response = await fetch(`${API_BASE}/faculty/courses`, { credentials: "include" });
   const result = await response.json().catch(() => ({}));
@@ -312,6 +316,7 @@ async function fetchAssignedCourses() {
 }
 
 
+// Load CO-PO matrix and PO attainment for a course.
 async function loadCoPoSection(course, idx) {
   const matrixContainer = document.getElementById(`co-po-matrix-${idx}`);
   const poContainer = document.getElementById(`po-attainment-${idx}`);
@@ -396,6 +401,7 @@ async function loadCoPoSection(course, idx) {
 // ========= MARKS UPLOAD =========
 let marksTargetIndex = null;
 
+// Trigger the file picker for Minor 1 upload.
 function handleMarksUploadClick(idx) {
   activeCourseIndex = idx;
   marksTargetIndex = idx;
@@ -403,6 +409,7 @@ function handleMarksUploadClick(idx) {
   excelInput.click();
 }
 
+// Trigger the file picker for Minor 2/3 or Major uploads.
 function handleMinorUploadClick(idx, type) {
   // type: 'minor2' | 'minor3' | 'major'
   activeCourseIndex = idx;
@@ -512,6 +519,7 @@ excelInput.addEventListener("change", (e) => {
 });
 
 // ========= NORMALIZE SHEET & SUMMARY =========
+// Normalize headers and rows from an Excel sheet.
 function normalizeSheet(rows) {
   if (!rows || !rows.length) throw new Error("Empty sheet");
 
@@ -567,6 +575,7 @@ function normalizeSheet(rows) {
   return { header, rows: objs };
 }
 
+// Build a summary (max marks, attempts, averages) for CO columns.
 function computeSummary(parsed) {
   const headers = parsed.header;
   if (!headers.includes(ROLL_COL)) throw new Error(`Missing column: ${ROLL_COL}`);
@@ -673,6 +682,7 @@ function computeSummary(parsed) {
 }
 
 // Flexible summary generator for arbitrary CO columns
+// Build a summary for a specific list of CO columns.
 function computeSummaryForCols(parsed, cols) {
   const headers = parsed.header;
   if (!parsed.rows.length) throw new Error("No data rows found");
@@ -791,6 +801,7 @@ function computeSummaryForCols(parsed, cols) {
            parsedRowsCount: parsedStudentRows.length, rowsWithRollValue, matchedByRollCount: studRowsStrict.length, rollMatchingMethod: useStrict ? 'strict' : 'non-empty' };
 }
 
+// Compute threshold marks and percentages for each column.
 function computeThresholds(summary, thresholdMarks, appearedStudents, thresholdPercentFallback) {
   const thresholdByCol = {};
   const above = {};
@@ -879,6 +890,7 @@ const resultsPrintable = document.getElementById("resultsPrintable");
 const drawerCourseTitle = document.getElementById("drawerCourseTitle");
 const drawerBatchInfo = document.getElementById("drawerBatchInfo");
 
+// Open the report drawer with the selected course title.
 function openDrawerForCourse(idx) {
   const course = courses[idx] || {};
   drawerCourseTitle.textContent = course.name || "Course Report";
@@ -890,6 +902,7 @@ document.getElementById("closeDrawerBtn").addEventListener("click", () => {
   resultsDrawer.classList.remove("open");
 });
 
+// Render the report in the drawer for the current payload.
 function renderReport(payload) {
   if (!payload) return;
   lastPayload = payload;
@@ -1092,6 +1105,7 @@ function renderReport(payload) {
 }
 
 // ========= GENERATE & DOWNLOAD REPORT (Minor/Major) =========
+// Generate a report payload and enable workbook download.
 function generateAndDownloadReport(parsed, cols, label) {
   try {
     const summary = computeSummaryForCols(parsed, cols);
@@ -1176,6 +1190,7 @@ function generateAndDownloadReport(parsed, cols, label) {
 }
 
 // Build an XLSX workbook from a payload (includes attainment if present)
+// Build an XLSX workbook from the report payload.
 function buildWorkbookFromPayload(payload, label) {
   if (!payload || !payload.summary) throw new Error('No payload to build workbook');
   const s = payload.summary;
@@ -1227,6 +1242,7 @@ function buildWorkbookFromPayload(payload, label) {
 
 // ========= FINAL ATTAINMENT MAPPING =========
 // Fetch final mapping using minors (internal) and major (external)
+// Generate the final attainment mapping table and export data.
 async function generateFinalAttainmentMapping(idx) {
   const course = (loadCourses() || [])[idx];
   if (!course || !course.courseId) {
@@ -1459,6 +1475,7 @@ async function generateFinalAttainmentMapping(idx) {
   }
 }
 
+// Load saved targets and remarks for the final mapping table.
 function loadFinalMappingMeta(courseId) {
   const empty = { targets: {}, remarks: {} };
   if (!courseId) return empty;
@@ -1475,6 +1492,7 @@ function loadFinalMappingMeta(courseId) {
   }
 }
 
+// Persist targets and remarks for the final mapping table.
 function saveFinalMappingMeta(courseId, meta) {
   if (!courseId) return;
   try {
@@ -1484,11 +1502,13 @@ function saveFinalMappingMeta(courseId, meta) {
   }
 }
 
+// Decide whether the target level is met.
 function calcMetStatus(attained, target) {
   if (!Number.isFinite(attained) || !Number.isFinite(target)) return '';
   return attained >= target ? 'MET' : 'NotMet';
 }
 
+// Build the HTML table for final attainment mapping.
 function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo) {
   let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div>` +
     `<div style="font-size:0.9rem;margin-top:4px;">Course Code : ${escapeHtml(courseCodeDisplay || "")}</div>` +
@@ -1533,6 +1553,7 @@ function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo) {
   return html;
 }
 
+// Attach change handlers to target and remarks inputs.
 function wireFinalMappingInputs(courseId, rows, hostEl) {
   if (!hostEl) return;
   const meta = loadFinalMappingMeta(courseId);
@@ -1581,6 +1602,7 @@ function wireFinalMappingInputs(courseId, rows, hostEl) {
   });
 }
 
+// Build an XLSX workbook for the final mapping table.
 function buildFinalMappingWorkbook(mapping) {
   // mapping.rows: [{co, internalLevel, externalLevel, direct},...]
   const rows = [];
@@ -1605,6 +1627,7 @@ function buildFinalMappingWorkbook(mapping) {
 }
 
 // ========= SAVE / LOAD REPORT PAYLOAD =========
+// Save the latest report payload per course.
 function saveReportForCourse(idx, payload) {
   try {
     localStorage.setItem("report_" + idx, JSON.stringify(payload));
@@ -1614,6 +1637,7 @@ function saveReportForCourse(idx, payload) {
 }
 
 // Persist minor/major report payloads separately so final mapping can read them
+// Save minor/major report payloads so final mapping can use them.
 function saveMinorReportForCourse(idx, typeLabel, payload) {
   try {
     const key = "report_" + idx + "_minors";
@@ -1626,6 +1650,7 @@ function saveMinorReportForCourse(idx, typeLabel, payload) {
   }
 }
 
+// Load saved minor/major report payloads.
 function loadMinorReportsForCourse(idx) {
   try {
     const key = "report_" + idx + "_minors";
@@ -1637,6 +1662,7 @@ function loadMinorReportsForCourse(idx) {
   }
 }
 
+// Load the last saved report payload for a course.
 function loadReportForCourse(idx) {
   const raw = localStorage.getItem("report_" + idx);
   if (!raw) return null;
@@ -1647,6 +1673,7 @@ function loadReportForCourse(idx) {
   }
 }
 
+// Reopen the last saved report in the drawer.
 function handleViewLastReport(idx) {
   const payload = loadReportForCourse(idx);
   if (!payload) {
@@ -1664,6 +1691,7 @@ function handleViewLastReport(idx) {
   openDrawerForCourse(idx);
 }
 
+// Make a safe filename for downloads.
 function sanitizeFilename(name) {
   return String(name || "report")
     .replace(/[\\/:*?"<>|]+/g, "_")
@@ -1672,6 +1700,7 @@ function sanitizeFilename(name) {
     .trim();
 }
 
+// Export the current report to PDF (if enabled).
 async function downloadReportPdf() {
   const printable = document.getElementById("resultsPrintable");
   if (!printable || !printable.innerHTML.trim()) {
@@ -1760,6 +1789,7 @@ async function downloadReportPdf() {
   }
 }
 
+// Ensure report is loaded before PDF export.
 function handlePdfDownloadClick(idx) {
   if (typeof idx !== "number" || Number.isNaN(idx)) return;
 
@@ -1809,6 +1839,7 @@ if (downloadXlsxBtn) {
 }
 
 // ========= INIT =========
+// Initialize the reports page and load assigned courses.
 async function initReports() {
   try {
     courses = await fetchAssignedCourses();

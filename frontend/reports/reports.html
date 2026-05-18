@@ -420,8 +420,9 @@
     }
 
     .section-separator {
-      border-top: 1px solid #ddd;
-      margin: 10px 0;
+      display: none;
+      border-top: none;
+      margin: 0;
     }
 
     .drawer-footer {
@@ -1113,19 +1114,14 @@
               <div class="helper-text">Click Generate Format to enter marks in the table.</div>
             </div>
           </div>
-          <div class="course-instructions" style="margin-top:14px;">Final Attainment Level Mapping</div>
           <div id="final-mapping-${idx}">Click Final Mapping to generate the table.</div>
-          <div class="course-instructions" style="margin-top:14px;">CO-PO Matrix</div>
+          <div class="course-instructions" style="margin-top:14px;font-weight:700;">CO-PO Matrix</div>
           <div id="co-po-matrix-${idx}">Loading CO-PO matrix...</div>
-          <div class="course-instructions" style="margin-top:14px;">PO Attainment (Direct)</div>
+          <div class="course-instructions" style="margin-top:14px;font-weight:700;">PO Attainment (Direct)</div>
           <div id="po-attainment-${idx}">Loading PO attainment...</div>
-          <div class="course-instructions" style="margin-top:14px;">Remarks Table</div>
           <div id="remarks-table-${idx}">Click Final Mapping to generate the table.</div>
-          <div class="course-instructions" style="margin-top:14px;">Met / Not Met Graph</div>
+          <div class="course-instructions" style="margin-top:14px;font-weight:700;">Met / Not Met Graph</div>
           <div id="remarks-chart-${idx}">Graph will appear after the remarks table is generated.</div>
-          <p class="helper-text">
-            Excel format: first row after header = max marks; following rows = students.
-          </p>
           <div class="download-row">
             <button class="btn btn-primary btn-disabled" data-role="download-pdf" data-idx="${idx}" disabled>Download Report (PDF)</button>
           </div>
@@ -2550,7 +2546,7 @@
     }
 
     function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo, mode) {
-      let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div><div class="section-separator"></div></div>`;
+      let html = ``;
       html += `<h4>Final Attainment Level Mapping</h4>`;
       html += `<table style="width:100%;border-collapse:collapse"><thead><tr>` +
         `<th style="text-align:left;padding:6px">CO</th>` +
@@ -2587,9 +2583,7 @@
     }
 
     function buildRemarksTableHtml(courseName, courseCodeDisplay, rows, mode) {
-      let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div>` +
-        `<div style="font-size:0.9rem;margin-top:4px;">Course Code : ${escapeHtml(courseCodeDisplay || "")}</div>` +
-        `<div class="section-separator"></div></div>`;
+      let html = `<div style="margin-bottom:10px;"><div class="section-separator"></div></div>`;
       html += `<h4>Remarks Table</h4>`;
       html += `<table style="width:100%;border-collapse:collapse"><thead><tr>` +
         `<th style="text-align:left;padding:6px">Sl.No</th>` +
@@ -2646,7 +2640,7 @@
       const gap = 14;
       const groupGap = 18;
       const chartHeight = 120;
-      const topPad = 18;
+      const topPad = 28;
       const bottomPad = 34;
       const leftPad = 40;
       const rightPad = 18;
@@ -2683,11 +2677,11 @@
       });
 
       const legendX = leftPad;
-      const legendY = topPad - 8;
+      const legendY = topPad - 18;
       svg += `<rect x="${legendX}" y="${legendY}" width="10" height="10" fill="#2e7d32" />`;
       svg += `<text x="${legendX + 14}" y="${legendY + 9}" font-size="10" fill="#444">MET</text>`;
-      svg += `<rect x="${legendX + 50}" y="${legendY}" width="10" height="10" fill="#c62828" />`;
-      svg += `<text x="${legendX + 64}" y="${legendY + 9}" font-size="10" fill="#444">NotMet</text>`;
+      svg += `<rect x="${legendX + 90}" y="${legendY}" width="10" height="10" fill="#c62828" />`;
+      svg += `<text x="${legendX + 104}" y="${legendY + 9}" font-size="10" fill="#444">NotMet</text>`;
 
       svg += `</svg>`;
       return `<div style="overflow-x:auto;">${svg}</div>`;
@@ -2991,11 +2985,6 @@
         if (chartContainer) {
           chartContainer.innerHTML = buildMetNotMetChartHtml(enriched);
         }
-
-        resultsPrintable.innerHTML = finalHtml;
-        drawerCourseTitle.textContent = courseName + ' — Final Attainment Level Mapping';
-        drawerBatchInfo.textContent = course.batch ? `Batch: ${course.batch}` : '';
-        resultsDrawer.classList.add('open');
 
         if (typeof activeCourseIndex === 'number' && !Number.isNaN(activeCourseIndex)) {
           const pdfBtn = coursesArea.querySelector(`button[data-role="download-pdf"][data-idx="${activeCourseIndex}"]`);

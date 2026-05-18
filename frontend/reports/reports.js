@@ -1516,7 +1516,6 @@ function calcMetStatus(attained, target) {
 // Build the HTML table for final attainment mapping.
 function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo) {
   let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div>` +
-    `<div style="font-size:0.9rem;margin-top:4px;">Course Code : ${escapeHtml(courseCodeDisplay || "")}</div>` +
     `<div class="section-separator"></div></div>`;
   if (debugInfo) {
     html += `<div style="margin:6px 0 10px;padding:6px 8px;border:1px dashed #b45;color:#7a1f2b;font-size:0.8rem;">${escapeHtml(debugInfo)}</div>`;

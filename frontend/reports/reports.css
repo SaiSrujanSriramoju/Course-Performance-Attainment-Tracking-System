@@ -483,8 +483,9 @@ a {
 }
 
 .section-separator {
-    border-top: 1px solid #ddd;
-    margin: 10px 0;
+    display: none;
+    border-top: none;
+    margin: 0;
 }
 
 /* Drawer footer (buttons – UI only, not in PDF) */

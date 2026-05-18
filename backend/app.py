@@ -369,6 +369,24 @@ def fetch_attainment_by_co(cursor, table_name, course_id, co_numbers):
     return {int(row["co_number"]): row.get("attainment") for row in rows}
 
 
+def fetch_attainment_cos(cursor, table_name, course_id):
+    allowed_tables = {
+        "minor1_attainment",
+        "minor2_attainment",
+        "minor3_attainment",
+        "major_attainment",
+    }
+    if table_name not in allowed_tables:
+        raise ValueError("Invalid attainment table")
+
+    cursor.execute(
+        f"SELECT DISTINCT co_number FROM {table_name} WHERE course_id=%s ORDER BY co_number",
+        (course_id,),
+    )
+    rows = cursor.fetchall()
+    return [int(row["co_number"]) for row in rows]
+
+
 # Map exam type labels to their database table names.
 def get_exam_table(exam_type):
     mapping = {
@@ -439,9 +457,27 @@ def export_marks_excel():
     rows = data.get("data")
     max_marks = data.get("max_marks")
 
-    co_numbers = get_exam_co_columns(exam_type)
+    co_numbers = data.get("co_numbers")
+    if isinstance(co_numbers, list) and co_numbers:
+        normalized = []
+        seen = set()
+        for value in co_numbers:
+            try:
+                co_num = int(value)
+            except (TypeError, ValueError):
+                return json_response({"success": False, "message": "Invalid co_numbers"}, 400)
+            if co_num <= 0 or co_num in seen:
+                continue
+            normalized.append(co_num)
+            seen.add(co_num)
+        co_numbers = normalized
+    else:
+        co_numbers = get_exam_co_columns(exam_type)
+        if not co_numbers:
+            return json_response({"success": False, "message": "Invalid exam_type"}, 400)
+
     if not co_numbers:
-        return json_response({"success": False, "message": "Invalid exam_type"}, 400)
+        return json_response({"success": False, "message": "No CO columns provided"}, 400)
     if not isinstance(rows, list) or not rows:
         return json_response({"success": False, "message": "data list required"}, 400)
     if not isinstance(max_marks, dict):
@@ -524,7 +560,7 @@ def load_attainment_ranges(course_id, faculty_id):
         conn.close()
 
 
-# Validate that attainment ranges are continuous and within 0-100.
+# Validate that attainment ranges are within 0-100.
 def validate_attainment_ranges(ranges):
     grouped = {}
     for entry in ranges:
@@ -552,7 +588,6 @@ def validate_attainment_ranges(ranges):
     for co_number, levels in grouped.items():
         levels.sort(key=lambda x: x["level_number"])
         expected_level = 1
-        prev_upper = None
         for level in levels:
             if level["level_number"] != expected_level:
                 return False, f"CO{co_number} levels must be continuous from 1"
@@ -562,9 +597,6 @@ def validate_attainment_ranges(ranges):
                 return False, f"CO{co_number} lower must be >= 0"
             if level["upper_limit"] > 100:
                 return False, f"CO{co_number} upper must be <= 100"
-            if prev_upper is not None and level["lower_limit"] != prev_upper + 1:
-                return False, f"CO{co_number} ranges must be continuous"
-            prev_upper = level["upper_limit"]
             expected_level += 1
 
         if levels and levels[-1]["upper_limit"] != 100:
@@ -1480,23 +1512,28 @@ def get_co_po_direct(course_id):
         attainment_by_co = compute_attainment_values(course_id, faculty_id)
         attainment_map = {co: data["level"] for co, data in attainment_by_co.items()}
 
-        po_numbers = list(range(1, 13))
+        po_numbers = sorted({int(row["po_number"]) for row in matrix_rows})
+        if not po_numbers:
+            return json_response({"success": False, "message": "Syllabus CO-PO matrix not uploaded"}, 404)
+
         matrix = {co: {po: 0 for po in po_numbers} for co in co_numbers}
         for row in matrix_rows:
-            if row["co_number"] in matrix and row["po_number"] in matrix[row["co_number"]]:
-                matrix[row["co_number"]][row["po_number"]] = int(row["value"])
+            co_num = int(row["co_number"])
+            po_num = int(row["po_number"])
+            if co_num in matrix and po_num in matrix[co_num]:
+                matrix[co_num][po_num] = int(row["value"])
 
-        co_count = max(len(co_numbers), 1)
         column_averages = {}
         for po in po_numbers:
-            total = sum(matrix[co][po] for co in co_numbers) if co_numbers else 0
-            column_averages[po] = round(total / co_count, 2)
+            values = [matrix[co][po] for co in co_numbers if matrix[co][po] > 0]
+            column_averages[po] = round(sum(values) / len(values), 2) if values else 0
 
         co_po_direct = []
         for co in co_numbers:
             co_attainment = attainment_map.get(co, 0.0)
             for po in po_numbers:
-                direct_val = round((co_attainment * column_averages[po]) / 3, 2)
+                weight = matrix[co][po]
+                direct_val = round(co_attainment * weight, 2)
                 co_po_direct.append({
                     "co_number": co,
                     "po_number": po,
@@ -1505,8 +1542,15 @@ def get_co_po_direct(course_id):
 
         po_attainment = []
         for po in po_numbers:
-            mapped = [row["value"] for row in co_po_direct if row["po_number"] == po]
-            po_att = round(sum(mapped) / len(mapped), 2) if mapped else 0
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for co in co_numbers:
+                weight = matrix[co][po]
+                if weight <= 0:
+                    continue
+                total_weight += weight
+                weighted_sum += attainment_map.get(co, 0.0) * weight
+            po_att = round(weighted_sum / total_weight, 2) if total_weight else 0
             po_attainment.append({"po_number": po, "attainment": po_att})
 
         return json_response({
@@ -1583,13 +1627,13 @@ def get_final_mapping(course_id):
     if not co_numbers:
         return json_response({"success": False, "message": "No COs found"}, 404)
 
-    minor1_cos = [co for co in co_numbers if co in (1, 2)]
-    minor2_cos = [co for co in co_numbers if co in (3, 4)]
-    minor3_cos = [co for co in co_numbers if co in (5, 6)]
-
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
+        minor1_cos = fetch_attainment_cos(cursor, "minor1_attainment", course_id)
+        minor2_cos = fetch_attainment_cos(cursor, "minor2_attainment", course_id)
+        minor3_cos = fetch_attainment_cos(cursor, "minor3_attainment", course_id)
+
         minor1_raw = fetch_attainment_by_co(cursor, "minor1_attainment", course_id, minor1_cos)
         minor2_raw = fetch_attainment_by_co(cursor, "minor2_attainment", course_id, minor2_cos)
         minor3_raw = fetch_attainment_by_co(cursor, "minor3_attainment", course_id, minor3_cos)

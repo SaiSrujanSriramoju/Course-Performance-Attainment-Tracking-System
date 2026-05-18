@@ -607,12 +607,7 @@
     // ========= CONFIG =========
     const ROLL_COL = "Roll No";
     const COLS = ["CO-1", "CO-2", "Tot"];
-    const EXAM_CO_MAP = {
-      minor1: ["CO-1", "CO-2"],
-      minor2: ["CO-3", "CO-4"],
-      minor3: ["CO-5", "CO-6"],
-      major: ["CO-1", "CO-2", "CO-3", "CO-4", "CO-5", "CO-6"]
-    };
+    const DEFAULT_CO_COLS = ["CO-1", "CO-2"];
 
     // ========= STATE =========
     let courses = [];
@@ -650,8 +645,38 @@
       return String(value).replace(/[\\"]/g, "\\$&");
     }
 
-    function getExamColumns(examType) {
-      return EXAM_CO_MAP[String(examType || "minor1").toLowerCase()] || EXAM_CO_MAP.minor1;
+    function getCourseCoCount(courseIdx) {
+      const course = courses[courseIdx] || {};
+      const raw = Number(course.numberOfCos || course.number_of_cos);
+      return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+    }
+
+    function buildCoColsFromCount(count) {
+      return Array.from({ length: count }, (_, i) => `CO-${i + 1}`);
+    }
+
+    function getExamColumns(examType, courseIdx) {
+      const normalized = String(examType || "minor1").toLowerCase();
+      const coCount = getCourseCoCount(courseIdx);
+      if (normalized === "major" && coCount) {
+        return buildCoColsFromCount(coCount);
+      }
+      if (coCount) {
+        return buildCoColsFromCount(Math.min(2, coCount));
+      }
+      return DEFAULT_CO_COLS.slice();
+    }
+
+    function getParsedCoColumns(parsed) {
+      const headers = (parsed && parsed.header) ? parsed.header : [];
+      return headers.filter(h => /^CO-\d+$/i.test(h));
+    }
+
+    function buildReportColumnsFromParsed(parsed) {
+      const coCols = getParsedCoColumns(parsed);
+      const cols = coCols.slice();
+      if (!cols.includes("Tot")) cols.push("Tot");
+      return cols;
     }
 
     function normalizeMarkInputValue(raw) {
@@ -798,7 +823,7 @@
     }
 
     function buildMarksTable(container, examType, courseIdx) {
-      const coCols = getExamColumns(examType);
+      const coCols = getExamColumns(examType, courseIdx);
       const headerCells = coCols.map((col) => buildCoHeaderCell(col)).join("");
       const maxInputs = coCols.map((col) => (
         `<td><input data-role="max" data-col="${col}" inputmode="decimal" placeholder="Max"></td>`
@@ -931,7 +956,16 @@
         maxPayload[key] = maxMarks[col];
       });
 
-      return { examType, data: payloadData, maxMarks: maxPayload };
+      const coNumbers = [];
+      coCols.forEach((col) => {
+        const coNum = Number(String(col).replace(/[^0-9]/g, ""));
+        if (!Number.isFinite(coNum) || coNum <= 0) {
+          throw new Error(`Invalid CO label: ${col}. Use labels like CO-1, CO-2.`);
+        }
+        if (!coNumbers.includes(coNum)) coNumbers.push(coNum);
+      });
+
+      return { examType, data: payloadData, maxMarks: maxPayload, coNumbers };
     }
 
     async function handleExportExcel(courseIdx) {
@@ -944,7 +978,8 @@
           body: JSON.stringify({
             exam_type: payload.examType,
             data: payload.data,
-            max_marks: payload.maxMarks
+            max_marks: payload.maxMarks,
+            co_numbers: payload.coNumbers
           })
         });
 
@@ -1064,10 +1099,10 @@
             <div class="marks-entry-toolbar">
               <label for="examSelect-${idx}">Exam Type</label>
               <select id="examSelect-${idx}" data-role="exam-select" data-idx="${idx}">
-                <option value="minor1">Minor 1 (CO1, CO2)</option>
-                <option value="minor2">Minor 2 (CO3, CO4)</option>
-                <option value="minor3">Minor 3 (CO5, CO6)</option>
-                <option value="major">Major (CO1-CO6)</option>
+                <option value="minor1">Minor 1 (select COs)</option>
+                <option value="minor2">Minor 2 (select COs)</option>
+                <option value="minor3">Minor 3 (select COs)</option>
+                <option value="major">Major (all COs)</option>
               </select>
               <button class="btn btn-outline" data-idx="${idx}" data-role="generate-format">Generate Format</button>
               <button class="btn btn-outline" data-idx="${idx}" data-role="add-co-col">Add CO Column</button>
@@ -1427,6 +1462,7 @@
           if (type === 'marks') {
             const summary = computeSummary(parsed);
             currentSummaryWithoutAtt = summary; // save for later
+            const reportCols = buildReportColumnsFromParsed(parsed);
 
             // threshold percentage comes from Courses module
             const course = courses[activeCourseIndex] || {};
@@ -1439,7 +1475,7 @@
               courseName: course.name || "Course",
               batch: course.batch || "",
               passingPercent: passPercent,
-              cols: COLS,
+              cols: reportCols,
               summary,
               thresholdPercent: passPercent,
               thresholdMarks: thresholdData.thresholdMarks,
@@ -1480,18 +1516,10 @@
             // PDF download removed
           } else {
             // minor2 / minor3 / major — generate a downloadable Excel report for selected COs
-            let cols = [];
-            let label = type;
-            if (type === 'minor2') {
-              cols = ['CO-3', 'CO-4', 'Tot'];
-              label = 'Minor2';
-            } else if (type === 'minor3') {
-              cols = ['CO-5', 'CO-6', 'Tot'];
-              label = 'Minor3';
-            } else if (type === 'major') {
-              cols = ['CO-1','CO-2','CO-3','CO-4','CO-5','CO-6','Tot'];
-              label = 'Major';
-            }
+            const cols = buildReportColumnsFromParsed(parsed);
+            const label = type === 'minor2'
+              ? 'Minor2'
+              : (type === 'minor3' ? 'Minor3' : 'Major');
 
             generateAndDownloadReport(parsed, cols, label);
           }

@@ -569,9 +569,7 @@ function renderCoRangeBlock(courseIndex, coNumber, levelCount, existing, thresho
         const entry = existing[level - 1] || {};
         const lower = entry.lower_limit !== undefined ? entry.lower_limit : (level === 1 ? 0 : "");
         const upper = entry.upper_limit !== undefined ? entry.upper_limit : (level === levelCount ? 100 : "");
-        const lowerCell = level === 1
-            ? `<input type="number" min="0" max="100" value="${lower}" data-co="${coNumber}" data-level="${level}" data-field="lower">`
-            : `<input type="number" min="0" max="100" value="${lower}" data-co="${coNumber}" data-level="${level}" data-field="lower" readonly>`;
+        const lowerCell = `<input type="number" min="0" max="100" value="${lower}" data-co="${coNumber}" data-level="${level}" data-field="lower">`;
         const upperAttrs = level === levelCount ? "readonly" : "";
         const upperValue = level === levelCount ? 100 : upper;
 
@@ -627,11 +625,11 @@ function updateAutoLower(block) {
     const lowerInputs = Array.from(block.querySelectorAll('input[data-field="lower"]'));
     for (let i = 1; i < lowerInputs.length; i += 1) {
         const prevUpper = Number(upperInputs[i - 1].value);
-        if (Number.isFinite(prevUpper)) {
-            lowerInputs[i].value = prevUpper + 1;
+        if (Number.isFinite(prevUpper) && String(lowerInputs[i].value).trim() === "") {
+            lowerInputs[i].value = prevUpper;
         }
     }
-    if (upperInputs.length) {
+    if (upperInputs.length && String(upperInputs[upperInputs.length - 1].value).trim() === "") {
         upperInputs[upperInputs.length - 1].value = 100;
     }
 }
@@ -683,9 +681,6 @@ function validateRangesForCourse(courseIndex) {
             }
             if (lower < 0 || upper > 100) {
                 return { valid: false, message: `CO${coNumber}: ranges must be 0-100` };
-            }
-            if (prevUpper !== null && lower !== prevUpper + 1) {
-                return { valid: false, message: `CO${coNumber}: ranges must be continuous` };
             }
             if (i === rows.length - 1 && upper !== 100) {
                 return { valid: false, message: `CO${coNumber}: last upper must be 100` };

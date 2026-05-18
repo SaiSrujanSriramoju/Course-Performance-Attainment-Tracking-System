@@ -74,6 +74,18 @@ function toNumberSafe(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function getParsedCoColumns(parsed) {
+  const headers = (parsed && parsed.header) ? parsed.header : [];
+  return headers.filter(h => /^CO-\d+$/i.test(h));
+}
+
+function buildReportColumnsFromParsed(parsed) {
+  const coCols = getParsedCoColumns(parsed);
+  const cols = coCols.slice();
+  if (!cols.includes("Tot")) cols.push("Tot");
+  return cols;
+}
+
 // ========= RENDER COURSES =========
 const coursesArea = document.getElementById("coursesArea");
 const excelInput = document.getElementById("excelInput");
@@ -438,6 +450,7 @@ excelInput.addEventListener("change", (e) => {
       if (type === 'marks') {
         const summary = computeSummary(parsed);
         currentSummaryWithoutAtt = summary; // save for later
+        const reportCols = buildReportColumnsFromParsed(parsed);
 
         // threshold percentage comes from Courses module
         const course = courses[activeCourseIndex] || {};
@@ -450,7 +463,7 @@ excelInput.addEventListener("change", (e) => {
           courseName: course.name || "Course",
           batch: course.batch || "",
           passingPercent: passPercent,
-          cols: COLS,
+          cols: reportCols,
           summary,
           thresholdPercent: passPercent,
           thresholdMarks: thresholdData.thresholdMarks,
@@ -491,18 +504,10 @@ excelInput.addEventListener("change", (e) => {
         // PDF download removed
       } else {
         // minor2 / minor3 / major — generate a downloadable Excel report for selected COs
-        let cols = [];
-        let label = type;
-        if (type === 'minor2') {
-          cols = ['CO-3', 'CO-4', 'Tot'];
-          label = 'Minor2';
-        } else if (type === 'minor3') {
-          cols = ['CO-5', 'CO-6', 'Tot'];
-          label = 'Minor3';
-        } else if (type === 'major') {
-          cols = ['CO-1','CO-2','CO-3','CO-4','CO-5','CO-6','Tot'];
-          label = 'Major';
-        }
+        const cols = buildReportColumnsFromParsed(parsed);
+        const label = type === 'minor2'
+          ? 'Minor2'
+          : (type === 'minor3' ? 'Minor3' : 'Major');
 
         generateAndDownloadReport(parsed, cols, label);
       }

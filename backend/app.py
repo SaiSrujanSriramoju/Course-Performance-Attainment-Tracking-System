@@ -1528,12 +1528,53 @@ def get_co_po_direct(course_id):
             values = [matrix[co][po] for co in co_numbers if matrix[co][po] > 0]
             column_averages[po] = round(sum(values) / len(values), 2) if values else 0
 
+        minor1_cos = [co for co in co_numbers if co in (1, 2)]
+        minor2_cos = [co for co in co_numbers if co in (3, 4)]
+        minor3_cos = [co for co in co_numbers if co in (5, 6)]
+
+        minor1_raw = fetch_attainment_by_co(cursor, "minor1_attainment", course_id, minor1_cos)
+        minor2_raw = fetch_attainment_by_co(cursor, "minor2_attainment", course_id, minor2_cos)
+        minor3_raw = fetch_attainment_by_co(cursor, "minor3_attainment", course_id, minor3_cos)
+        major_raw = fetch_attainment_by_co(cursor, "major_attainment", course_id, co_numbers)
+
+        def normalize_values(raw_map, cos):
+            normalized = {}
+            for co in cos:
+                try:
+                    value = float(raw_map.get(co))
+                except (TypeError, ValueError):
+                    value = 0.0
+                if not math.isfinite(value):
+                    value = 0.0
+                normalized[co] = value
+            return normalized
+
+        minor1_map = normalize_values(minor1_raw, minor1_cos)
+        minor2_map = normalize_values(minor2_raw, minor2_cos)
+        minor3_map = normalize_values(minor3_raw, minor3_cos)
+        major_map = normalize_values(major_raw, co_numbers)
+
+        internal_by_co = {co: 0.0 for co in co_numbers}
+        internal_by_co.update(minor1_map)
+        internal_by_co.update(minor2_map)
+        internal_by_co.update(minor3_map)
+
+        direct_by_co = {}
+        for co in co_numbers:
+            internal = internal_by_co.get(co, 0.0)
+            external = major_map.get(co, 0.0)
+            direct_by_co[co] = round((internal * 0.4) + (external * 0.6), 2)
+
+        avg_direct = 0.0
+        if co_numbers:
+            avg_direct = sum(direct_by_co.get(co, 0.0) for co in co_numbers) / len(co_numbers)
+
         co_po_direct = []
         for co in co_numbers:
-            co_attainment = attainment_map.get(co, 0.0)
+            co_attainment = direct_by_co.get(co, 0.0)
             for po in po_numbers:
                 weight = matrix[co][po]
-                direct_val = round(co_attainment * weight, 2)
+                direct_val = round((co_attainment * weight) / 3, 2)
                 co_po_direct.append({
                     "co_number": co,
                     "po_number": po,
@@ -1542,15 +1583,7 @@ def get_co_po_direct(course_id):
 
         po_attainment = []
         for po in po_numbers:
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for co in co_numbers:
-                weight = matrix[co][po]
-                if weight <= 0:
-                    continue
-                total_weight += weight
-                weighted_sum += attainment_map.get(co, 0.0) * weight
-            po_att = round(weighted_sum / total_weight, 2) if total_weight else 0
+            po_att = round((column_averages[po] * avg_direct) / 3, 2)
             po_attainment.append({"po_number": po, "attainment": po_att})
 
         return json_response({

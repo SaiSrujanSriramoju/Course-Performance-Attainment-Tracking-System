@@ -616,6 +616,7 @@
     let lastPayload = null;             // last computed report for the active course (includes attainment)
     let currentSummaryWithoutAtt = null;// summary before attainment so we can re-apply if needed
     const marksEntryState = {};
+    const coPoCache = {};
 
     // ========= UTILS =========
     function loadCourses() {
@@ -1302,6 +1303,85 @@
       return mapped;
     }
 
+    function computeColumnAverages(matrix, poCount) {
+      const averages = [];
+      const rows = Array.isArray(matrix) ? matrix : [];
+      const coCount = rows.length || 0;
+      for (let i = 0; i < poCount; i += 1) {
+        let sum = 0;
+        for (let r = 0; r < coCount; r += 1) {
+          const val = Number(rows[r]?.[i] ?? 0);
+          sum += Number.isFinite(val) ? val : 0;
+        }
+        const avg = coCount ? Number((sum / coCount).toFixed(2)) : 0;
+        averages.push(avg);
+      }
+      return averages;
+    }
+
+    function renderPoAttainmentTable(container, poValues) {
+      if (!container) return;
+      const rows = (poValues || []).map((value, i) => (
+        `<tr><td>PO${i + 1}</td><td>${Number.isFinite(value) ? value.toFixed(2) : ""}</td></tr>`
+      )).join("");
+
+      container.innerHTML = `
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th>PO</th>
+              <th>Attainment Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || "<tr><td colspan=\"2\">No PO attainment available.</td></tr>"}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function computePoAttainmentFromDirect(averages, directValues) {
+      const avgDirect = (directValues || []).length
+        ? (directValues.reduce((a, b) => a + b, 0) / directValues.length)
+        : NaN;
+      return (averages || []).map((avg) => (
+        Number.isFinite(avg) && Number.isFinite(avgDirect)
+          ? Number(((avg * avgDirect) / 3).toFixed(2))
+          : NaN
+      ));
+    }
+
+    async function updatePoAttainmentFromFinalMapping(courseId, idx, rows) {
+      const poContainer = document.getElementById(`po-attainment-${idx}`);
+      if (!courseId || !poContainer) return;
+
+      const directValues = (rows || [])
+        .map((r) => Number(r.direct))
+        .filter((v) => Number.isFinite(v));
+
+      let cache = coPoCache[courseId];
+      if (!cache) {
+        try {
+          const resp = await fetch(`${API_BASE}/co_po_matrix/${courseId}`, { credentials: "include" });
+          const result = await resp.json().catch(() => ({}));
+          if (!resp.ok || result.success === false) {
+            throw new Error(result.message || "Failed to load CO-PO matrix");
+          }
+          const poCount = Number(result.po_count || 0) || 0;
+          const matrix = Array.isArray(result.matrix) ? result.matrix : [];
+          const averages = computeColumnAverages(matrix, poCount);
+          cache = { poCount, matrix, averages };
+          coPoCache[courseId] = cache;
+        } catch (err) {
+          poContainer.innerHTML = `<p>${err.message || "Failed to load PO attainment"}</p>`;
+          return;
+        }
+      }
+
+      const poValues = computePoAttainmentFromDirect(cache.averages, directValues);
+      renderPoAttainmentTable(poContainer, poValues);
+    }
+
     async function loadCoPoSection(course, idx) {
       const matrixContainer = document.getElementById(`co-po-matrix-${idx}`);
       const poContainer = document.getElementById(`po-attainment-${idx}`);
@@ -1311,22 +1391,6 @@
         matrixContainer.innerHTML = "<p>CO-PO matrix not available for this course.</p>";
         poContainer.innerHTML = "<p>PO attainment not available for this course.</p>";
         return;
-      }
-
-      function computeColumnAverages(matrix, poCount) {
-        const averages = [];
-        const rows = Array.isArray(matrix) ? matrix : [];
-        const coCount = rows.length || 0;
-        for (let i = 0; i < poCount; i += 1) {
-          let sum = 0;
-          for (let r = 0; r < coCount; r += 1) {
-            const val = Number(rows[r]?.[i] ?? 0);
-            sum += Number.isFinite(val) ? val : 0;
-          }
-          const avg = coCount ? Number((sum / coCount).toFixed(2)) : 0;
-          averages.push(avg);
-        }
-        return averages;
       }
 
       try {
@@ -1381,27 +1445,13 @@
             ? Number((directValues.reduce((a, b) => a + b, 0) / directValues.length).toFixed(2))
             : NaN;
 
-          const poRows = averages.map((avg, i) => {
-            const value = Number.isFinite(avg) && Number.isFinite(totalDirect)
+          const poValues = averages.map((avg) => (
+            Number.isFinite(avg) && Number.isFinite(totalDirect)
               ? Number(((avg * totalDirect) / 3).toFixed(2))
-              : NaN;
-            const display = Number.isFinite(value) ? value.toFixed(2) : "";
-            return `<tr><td>PO${i + 1}</td><td>${display}</td></tr>`;
-          }).join("");
-
-          poContainer.innerHTML = `
-            <table class="matrix-table">
-              <thead>
-                <tr>
-                  <th>PO</th>
-                  <th>Attainment Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${poRows || "<tr><td colspan=\"2\">No PO attainment available.</td></tr>"}
-              </tbody>
-            </table>
-          `;
+              : NaN
+          ));
+          renderPoAttainmentTable(poContainer, poValues);
+          coPoCache[course.courseId] = { poCount, matrix, averages };
         } catch (err) {
           poContainer.innerHTML = `<p>${err.message || "Failed to load PO attainment"}</p>`;
         }
@@ -2968,11 +3018,19 @@
         const debugInfo = `Debug localData=${localData ? 'yes' : 'no'} | CO-4 local internal=${li[4]} external=${le[4]} | backend internal=${b4?.internal} external=${b4?.external}` +
                           `; CO-6 local internal=${li[6]} external=${le[6]} | backend internal=${b6?.internal} external=${b6?.external}`;
 
+        try {
+          localStorage.setItem(`final_mapping_done_${course.courseId}`, new Date().toISOString());
+        } catch (e) {
+          // ignore storage errors
+        }
+
         const finalHtml = buildFinalMappingHtml(courseName, courseCodeDisplay, normalized, "", mode);
         const mappingContainer = document.getElementById(`final-mapping-${idx}`);
         if (mappingContainer) {
           mappingContainer.innerHTML = finalHtml;
         }
+
+        updatePoAttainmentFromFinalMapping(course.courseId, idx, normalized);
 
         const remarksHtml = buildRemarksTableHtml(courseName, courseCodeDisplay, enriched, mode);
         const remarksContainer = document.getElementById(`remarks-table-${idx}`);

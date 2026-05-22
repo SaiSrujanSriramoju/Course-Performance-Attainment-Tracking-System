@@ -90,7 +90,8 @@ function buildReportColumnsFromParsed(parsed) {
 const coursesArea = document.getElementById("coursesArea");
 const excelInput = document.getElementById("excelInput");
 
-// Apply attainment levels from backend ranges and update the report view.
+// CO attainment: apply backend-defined level ranges to computed percentages.
+// Also persists exam-level attainment so final mapping can reuse the values.
 async function applyBackendAttainment(payload, courseId) {
   try {
     payload.attainment = payload.attainment || {};
@@ -191,7 +192,7 @@ async function applyBackendAttainment(payload, courseId) {
   }
 }
 
-// Apply threshold marks from the backend for each CO.
+// Validation/thresholds: pull authoritative threshold marks from backend.
 async function applyBackendThresholds(payload, courseId) {
   try {
     payload.thresholdsRefreshing = true;
@@ -524,6 +525,7 @@ excelInput.addEventListener("change", (e) => {
 });
 
 // ========= NORMALIZE SHEET & SUMMARY =========
+// Marks processing: normalize Excel headers/rows into a consistent shape.
 // Normalize headers and rows from an Excel sheet.
 function normalizeSheet(rows) {
   if (!rows || !rows.length) throw new Error("Empty sheet");
@@ -580,7 +582,7 @@ function normalizeSheet(rows) {
   return { header, rows: objs };
 }
 
-// Build a summary (max marks, attempts, averages) for CO columns.
+// Marks processing: compute max marks, attempts, averages, and attendance.
 function computeSummary(parsed) {
   const headers = parsed.header;
   if (!headers.includes(ROLL_COL)) throw new Error(`Missing column: ${ROLL_COL}`);
@@ -806,7 +808,7 @@ function computeSummaryForCols(parsed, cols) {
            parsedRowsCount: parsedStudentRows.length, rowsWithRollValue, matchedByRollCount: studRowsStrict.length, rollMatchingMethod: useStrict ? 'strict' : 'non-empty' };
 }
 
-// Compute threshold marks and percentages for each column.
+// Validation + attainment prep: compute threshold marks and % above threshold.
 function computeThresholds(summary, thresholdMarks, appearedStudents, thresholdPercentFallback) {
   const thresholdByCol = {};
   const above = {};
@@ -890,6 +892,7 @@ function computeWeightedAggregate(values, weights) {
 }
 
 // ========= REPORT RENDERING =========
+// Report generation: render the on-screen report from the computed payload.
 const resultsDrawer = document.getElementById("resultsDrawer");
 const resultsPrintable = document.getElementById("resultsPrintable");
 const drawerCourseTitle = document.getElementById("drawerCourseTitle");
@@ -907,7 +910,7 @@ document.getElementById("closeDrawerBtn").addEventListener("click", () => {
   resultsDrawer.classList.remove("open");
 });
 
-// Render the report in the drawer for the current payload.
+// Report generation: render the report sections (summary, thresholds, attainment).
 function renderReport(payload) {
   if (!payload) return;
   lastPayload = payload;
@@ -1110,7 +1113,7 @@ function renderReport(payload) {
 }
 
 // ========= GENERATE & DOWNLOAD REPORT (Minor/Major) =========
-// Generate a report payload and enable workbook download.
+// Report generation: compute summary/thresholds and build downloadable XLSX.
 function generateAndDownloadReport(parsed, cols, label) {
   try {
     const summary = computeSummaryForCols(parsed, cols);
@@ -1194,8 +1197,7 @@ function generateAndDownloadReport(parsed, cols, label) {
   }
 }
 
-// Build an XLSX workbook from a payload (includes attainment if present)
-// Build an XLSX workbook from the report payload.
+// Report generation: build an XLSX workbook from the report payload.
 function buildWorkbookFromPayload(payload, label) {
   if (!payload || !payload.summary) throw new Error('No payload to build workbook');
   const s = payload.summary;
@@ -1246,8 +1248,8 @@ function buildWorkbookFromPayload(payload, label) {
 // Attainment modal removed: attainment levels must be configured in Courses module.
 
 // ========= FINAL ATTAINMENT MAPPING =========
-// Fetch final mapping using minors (internal) and major (external)
-// Generate the final attainment mapping table and export data.
+// CO/PO attainment: combine internal (minors) and external (major) into direct.
+// Report generation: build the final attainment mapping table and export data.
 async function generateFinalAttainmentMapping(idx) {
   const course = (loadCourses() || [])[idx];
   if (!course || !course.courseId) {
@@ -1513,7 +1515,7 @@ function calcMetStatus(attained, target) {
   return attained >= target ? 'MET' : 'NotMet';
 }
 
-// Build the HTML table for final attainment mapping.
+// Report generation: build the final attainment mapping HTML table.
 function buildFinalMappingHtml(courseName, courseCodeDisplay, rows, debugInfo) {
   let html = `<div style="margin-bottom:10px;"><div style="font-size:1.1rem;font-weight:700;color:#a10e1d;">${escapeHtml(courseName)}</div>` +
     `<div class="section-separator"></div></div>`;
@@ -1606,7 +1608,7 @@ function wireFinalMappingInputs(courseId, rows, hostEl) {
   });
 }
 
-// Build an XLSX workbook for the final mapping table.
+// Report generation: build an XLSX workbook for the final mapping table.
 function buildFinalMappingWorkbook(mapping) {
   // mapping.rows: [{co, internalLevel, externalLevel, direct},...]
   const rows = [];

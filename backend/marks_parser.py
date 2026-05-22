@@ -4,11 +4,11 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 
-# Canonical column name used to identify student roll numbers.
+# Marks processing: canonical column name used to identify student roll numbers.
 ROLL_COL = "Roll No"
 
 
-# Find the first row that looks like a header with the Roll No column.
+# Marks processing: find the header row containing the Roll No column.
 def _find_header_row(df: pd.DataFrame) -> int:
     max_scan = min(10, len(df))
     for i in range(max_scan):
@@ -18,7 +18,7 @@ def _find_header_row(df: pd.DataFrame) -> int:
     return -1
 
 
-# Normalize a CO column label and extract its number.
+# Marks processing: normalize CO column labels like "CO 3" and extract the number.
 def _normalize_co_col(name: str) -> Tuple[bool, int]:
     if not name:
         return False, -1
@@ -31,7 +31,7 @@ def _normalize_co_col(name: str) -> Tuple[bool, int]:
     return True, int(match.group(1))
 
 
-# Convert raw marks to a numeric value (AB treated as zero).
+# Marks processing: convert raw marks to numeric (AB -> 0, invalid -> NaN).
 def _to_number(value) -> float:
     if pd.isna(value):
         return float("nan")
@@ -44,7 +44,7 @@ def _to_number(value) -> float:
         return float("nan")
 
 
-# Parse marks Excel into max marks and per-student scores.
+# Marks processing: parse marks Excel into max marks and per-student scores.
 def parse_marks_excel(file_path: str) -> Dict[str, object]:
     try:
         raw = pd.read_excel(file_path, header=None, engine="openpyxl")
